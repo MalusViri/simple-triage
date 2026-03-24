@@ -36,12 +36,16 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
     assert report_json["sample"]["name"] == "note.txt"
     assert output_dir.name.startswith("note_")
     assert sorted(report_json.keys()) == [
+        "analysis_summary",
         "capabilities",
         "environment",
         "errors",
         "generated_at",
         "hashes",
+        "interesting_strings_preview",
         "imports",
+        "iocs",
+        "packed_assessment",
         "pe",
         "sample",
         "strings",
@@ -65,10 +69,31 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "registry_paths",
         "urls",
     ]
+    assert sorted(report_json["iocs"].keys()) == [
+        "commands",
+        "domains",
+        "file_paths",
+        "ips",
+        "mutexes",
+        "registry_paths",
+        "urls",
+    ]
+    assert sorted(report_json["analysis_summary"].keys()) == [
+        "recommended_next_step",
+        "reasons",
+        "score",
+        "severity",
+        "top_findings",
+    ]
+    assert "## Quick Assessment" in summary
+    assert "## Top Findings" in summary
     assert "## Environment and Degraded Mode" in summary
+    assert "## Likely Packed Assessment" in summary
     assert "## Suspicious Strings Highlights" in summary
-    assert "## Top Capabilities Inferred" in summary
+    assert "## Capability Highlights" in summary
+    assert "## IOC Highlights" in summary
     assert report.sample["name"] == "note.txt"
+    assert isinstance(report_json["interesting_strings_preview"], list)
 
 
 def test_degraded_mode_reporting_when_dependencies_missing(tmp_path, fixture_dir, monkeypatch):

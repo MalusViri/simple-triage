@@ -10,10 +10,13 @@ from typing import Any
 
 from staticprep.analyzers.capabilities import infer_capabilities
 from staticprep.analyzers.hashes import compute_hashes
+from staticprep.analyzers.iocs import build_interesting_strings_preview, extract_iocs
 from staticprep.analyzers import pe as pe_analyzer
+from staticprep.analyzers.prioritization import assess_packed_status, build_analysis_summary
 from staticprep.analyzers.strings import extract_strings_from_file, filter_suspicious_strings
 from staticprep.analyzers.yara_scan import run_yara_scan, yara as yara_module
 from staticprep.config import (
+    load_analysis_settings,
     DEFAULT_RULES_DIR,
     load_capability_map,
     load_suspicious_patterns,
@@ -115,6 +118,7 @@ def analyze_sample(
 
     capability_map = load_capability_map()
     suspicious_patterns = load_suspicious_patterns()
+    analysis_settings = load_analysis_settings()
     environment = build_environment_report(skip_pe=skip_pe, skip_yara=skip_yara)
     if environment["degraded_mode"]:
         for reason in environment["degraded_reasons"]:
@@ -214,10 +218,40 @@ def analyze_sample(
         strings=[match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings,
         yara_matches=yara_results["matches"],
     )
+    capabilities_dict = {
+        name: {
+            "matched": result.matched,
+            "evidence": result.evidence,
+            "evidence_source": result.evidence_source,
+            "evidence_sources": result.evidence_sources,
+            "confidence": result.confidence,
+        }
+        for name, result in capabilities.items()
+    }
+
+    packed_assessment = assess_packed_status(pe_info, analysis_settings)
+    iocs = extract_iocs(suspicious_strings, suspicious_categories)
+    interesting_strings_preview = build_interesting_strings_preview(
+        suspicious_categories,
+        iocs,
+        limit=analysis_settings["interesting_strings_preview_limit"],
+    )
+    analysis_summary = build_analysis_summary(
+        capabilities=capabilities_dict,
+        suspicious_categories=suspicious_categories,
+        yara_results=yara_results,
+        packed_assessment=packed_assessment,
+        environment=environment,
+        analysis_settings=analysis_settings,
+    )
 
     report = AnalysisReport(
         sample=metadata,
         environment=environment,
+        analysis_summary=analysis_summary,
+        packed_assessment=packed_assessment,
+        iocs=iocs,
+        interesting_strings_preview=interesting_strings_preview,
         hashes=hashes,
         strings={
             "ascii_count": len(ascii_strings),

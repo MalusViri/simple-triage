@@ -9,14 +9,17 @@ from typing import Any
 def build_summary_markdown(report: dict[str, Any]) -> str:
     """Build a concise analyst-facing markdown summary."""
     sample = report["sample"]
+    analysis_summary = report["analysis_summary"]
     environment = report["environment"]
+    packed_assessment = report["packed_assessment"]
+    iocs = report["iocs"]
+    preview = report["interesting_strings_preview"]
     hashes = report["hashes"]
-    pe = report["pe"]
     strings = report["strings"]
     yara = report["yara"]
     matched_caps = sorted(
         [
-            (name, result["confidence"])
+            (name, result["confidence"], result["evidence"][:3])
             for name, result in report["capabilities"].items()
             if result["matched"]
         ],
@@ -42,49 +45,54 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
     lines = [
         "# staticprep Summary",
         "",
-        "## Sample Overview",
+        "## Quick Assessment",
         "",
-        f"- Sample: `{sample['name']}`",
-        f"- Output folder suffix: `{hashes['sha256'][:8]}`",
-        f"- Path: `{sample['path']}`",
-        f"- Size: `{sample['size']}` bytes",
-        f"- MIME hint: `{sample['type_hint']}`",
+        f"- Worth deeper investigation: `{analysis_summary['recommended_next_step'] != 'archive'}`",
+        f"- Severity: `{analysis_summary['severity']}`",
+        f"- Score: `{analysis_summary['score']}`",
+        f"- Recommended next step: `{analysis_summary['recommended_next_step']}`",
         "",
-        "## Hashes",
-        "",
-        f"- MD5: `{hashes['md5']}`",
-        f"- SHA1: `{hashes['sha1']}`",
-        f"- SHA256: `{hashes['sha256']}`",
-        "",
-        "## Environment and Degraded Mode",
-        "",
-        f"- `pefile` available: `{environment['pefile_available']}`",
-        f"- `yara-python` available: `{environment['yara_available']}`",
-        f"- Degraded mode: `{environment['degraded_mode']}`",
-        f"- Reasons: `{', '.join(environment['degraded_reasons']) if environment['degraded_reasons'] else 'none'}`",
-        "",
-        "## PE Analysis Status",
-        "",
-        f"- Attempted: `{pe['attempted']}`",
-        f"- Succeeded: `{pe['succeeded']}`",
-        f"- Skipped: `{pe['skipped']}`",
-        f"- Error: `{pe['error'] or 'none'}`",
-        f"- PE detected: `{pe['is_pe']}`",
+        "## Top Findings",
         "",
     ]
-
-    if pe["succeeded"] and pe["is_pe"]:
-        lines.extend(
-            [
-                f"- Machine: `{pe.get('machine_type', 'unknown')}`",
-                f"- Compile timestamp: `{pe.get('compile_timestamp', 'unknown')}`",
-                f"- Subsystem: `{pe.get('subsystem', 'unknown')}`",
-                f"- Entry point: `{pe.get('entry_point', 'unknown')}`",
-                f"- Image base: `{pe.get('image_base', 'unknown')}`",
-                f"- Sections: `{pe.get('number_of_sections', 0)}`",
-                "",
-            ]
-        )
+    lines.extend(
+        [f"- {finding}" for finding in analysis_summary["top_findings"]]
+        or ["- No strong static findings identified."]
+    )
+    lines.extend(
+        [
+            "",
+            "## Sample Overview",
+            "",
+            f"- Sample: `{sample['name']}`",
+            f"- Output folder suffix: `{hashes['sha256'][:8]}`",
+            f"- Path: `{sample['path']}`",
+            f"- Size: `{sample['size']}` bytes",
+            f"- MIME hint: `{sample['type_hint']}`",
+            "",
+            "## Hashes",
+            "",
+            f"- MD5: `{hashes['md5']}`",
+            f"- SHA1: `{hashes['sha1']}`",
+            f"- SHA256: `{hashes['sha256']}`",
+            "",
+            "## Environment and Degraded Mode",
+            "",
+            f"- `pefile` available: `{environment['pefile_available']}`",
+            f"- `yara-python` available: `{environment['yara_available']}`",
+            f"- Degraded mode: `{environment['degraded_mode']}`",
+            f"- Reasons: `{', '.join(environment['degraded_reasons']) if environment['degraded_reasons'] else 'none'}`",
+            "",
+            "## Likely Packed Assessment",
+            "",
+            f"- Attempted: `{packed_assessment['attempted']}`",
+            f"- Succeeded: `{packed_assessment['succeeded']}`",
+            f"- Likely packed: `{packed_assessment['likely_packed']}`",
+            f"- Threshold used: `{packed_assessment['threshold_used']}`",
+            f"- Rationale: `{packed_assessment['rationale']}`",
+            "",
+        ]
+    )
 
     lines.extend(
         [
@@ -94,20 +102,32 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
         ]
     )
     lines.extend(suspicious_summary or ["- No suspicious string highlights identified."])
+    if preview:
+        lines.append(f"- Interesting preview: `{', '.join(preview[:5])}`")
     lines.extend(
         [
             "",
-            "## Top Capabilities Inferred",
+            "## Capability Highlights",
             "",
         ]
     )
     if matched_caps:
-        for name, confidence in matched_caps[:5]:
-            lines.append(f"- `{name}` with `{confidence}` confidence")
+        for name, confidence, evidence in matched_caps[:5]:
+            lines.append(
+                f"- `{name}` with `{confidence}` confidence"
+                + (f" from `{', '.join(evidence)}`" if evidence else "")
+            )
     else:
         lines.append("- No capabilities matched configured indicators.")
     lines.extend(
         [
+            "",
+            "## IOC Highlights",
+            "",
+            f"- URLs: `{', '.join(iocs['urls'][:3]) if iocs['urls'] else 'none'}`",
+            f"- Domains: `{', '.join(iocs['domains'][:3]) if iocs['domains'] else 'none'}`",
+            f"- Registry paths: `{', '.join(iocs['registry_paths'][:3]) if iocs['registry_paths'] else 'none'}`",
+            f"- Commands: `{', '.join(iocs['commands'][:3]) if iocs['commands'] else 'none'}`",
             "",
             "## YARA Highlights",
             "",
@@ -124,7 +144,7 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
     lines.append("")
 
     if report["errors"]:
-        lines.extend(["## Errors and Warnings", ""])
+        lines.extend(["## Warnings and Errors", ""])
         for error in report["errors"]:
             lines.append(
                 f"- `{error['severity']}` during `{error['stage']}`: {error['message']}"

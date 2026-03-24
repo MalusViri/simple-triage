@@ -9,6 +9,7 @@ dist/
 output/
 tmp_output/
 tmp_output_phase2/
+tmp_output_phase3/
 
 # Codex / local agent instructions
 AGENTS.md

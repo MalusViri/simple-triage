@@ -40,6 +40,10 @@ class AnalysisReport:
 
     sample: dict[str, Any]
     environment: dict[str, Any]
+    analysis_summary: dict[str, Any]
+    packed_assessment: dict[str, Any]
+    iocs: dict[str, Any]
+    interesting_strings_preview: list[str]
     hashes: dict[str, str]
     strings: dict[str, Any]
     pe: dict[str, Any]

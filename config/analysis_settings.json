@@ -1,0 +1,26 @@
+{
+  "interesting_strings_preview_limit": 8,
+  "entropy": {
+    "high_entropy_threshold": 7.2,
+    "min_high_entropy_sections_for_likely_packed": 1
+  },
+  "scoring": {
+    "weights": {
+      "high_confidence_capability": 20,
+      "medium_confidence_capability": 12,
+      "low_confidence_capability": 6,
+      "yara_hit": 18,
+      "high_entropy_section": 10,
+      "likely_packed": 15,
+      "suspicious_url": 6,
+      "suspicious_registry_path": 5,
+      "suspicious_command": 5,
+      "suspicious_powershell": 7,
+      "degraded_mode_penalty": -10
+    },
+    "severity_thresholds": {
+      "high": 55,
+      "medium": 25
+    }
+  }
+}
