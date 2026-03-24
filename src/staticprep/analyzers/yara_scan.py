@@ -12,6 +12,15 @@ except ImportError:  # pragma: no cover - dependency may be absent in some envir
     yara = None
 
 
+def _build_yara_externals(path: Path) -> dict[str, str]:
+    """Return standard YARA external variables for a sample."""
+    return {
+        "filepath": str(path.resolve()),
+        "filename": path.name,
+        "extension": path.suffix.lower().lstrip("."),
+    }
+
+
 def _collect_rule_files(rules_dir: Path) -> list[Path]:
     return sorted(
         [
@@ -24,6 +33,8 @@ def _collect_rule_files(rules_dir: Path) -> list[Path]:
 
 def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """Scan a file with local YARA rules and return match data with structured errors."""
+    externals = _build_yara_externals(path)
+
     if yara is None:
         return {
             "attempted": True,
@@ -84,7 +95,7 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
     for index, rule_file in enumerate(rule_files):
         namespace = f"rule_{index}"
         try:
-            yara.compile(filepath=str(rule_file))
+            yara.compile(filepath=str(rule_file), externals=externals)
         except Exception as exc:  # pragma: no cover - depends on yara parsing errors
             errors.append(
                 {
@@ -108,9 +119,9 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             "matches": [],
         }, errors
 
-    rules = yara.compile(filepaths=compiled_namespaces)
+    rules = yara.compile(filepaths=compiled_namespaces, externals=externals)
     matches = []
-    for match in rules.match(str(path)):
+    for match in rules.match(str(path), externals=externals):
         matches.append(
             {
                 "rule": match.rule,

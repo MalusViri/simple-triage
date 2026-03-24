@@ -289,6 +289,26 @@ Current IOC fields:
 
 These values are deduplicated and normalized where practical. No internet validation or enrichment is performed.
 
+## YARA Externals
+
+`staticprep` provides a small standard set of YARA external variables for every local scan. These are passed through the yara-python compile and match paths so rules that reference them compile and run without extra user configuration.
+
+Supported externals:
+
+- `filepath`: full resolved sample path as a string
+- `filename`: sample basename
+- `extension`: lowercase file extension without the leading dot
+
+Example use in a local rule:
+
+```yara
+rule MatchExeByExternal
+{
+    condition:
+        extension == "exe" and filename contains "sample"
+}
+```
+
 ## Interesting Strings Preview
 
 `interesting_strings_preview` is a short curated list of higher-value strings for quick review. It prefers categories such as:
