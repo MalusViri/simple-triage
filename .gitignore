@@ -8,6 +8,7 @@ dist/
 *.egg-info/
 output/
 tmp_output/
+tmp_output_phase2/
 
 # Codex / local agent instructions
 AGENTS.md

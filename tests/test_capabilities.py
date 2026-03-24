@@ -24,3 +24,5 @@ def test_infer_capabilities_uses_configured_indicators():
     assert result["networking"].matched is True
     assert result["networking"].evidence == ["connect", "http://", "networking"]
     assert result["networking"].evidence_source == ["API", "string", "YARA"]
+    assert result["networking"].evidence_sources == ["API", "string", "YARA"]
+    assert result["networking"].confidence == "high"

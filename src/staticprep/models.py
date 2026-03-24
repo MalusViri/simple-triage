@@ -30,6 +30,8 @@ class CapabilityResult:
     matched: bool
     evidence: list[str] = field(default_factory=list)
     evidence_source: list[str] = field(default_factory=list)
+    evidence_sources: list[str] = field(default_factory=list)
+    confidence: str = "low"
 
 
 @dataclass(slots=True)
@@ -37,6 +39,7 @@ class AnalysisReport:
     """Canonical report structure exported as JSON."""
 
     sample: dict[str, Any]
+    environment: dict[str, Any]
     hashes: dict[str, str]
     strings: dict[str, Any]
     pe: dict[str, Any]

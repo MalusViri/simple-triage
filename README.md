@@ -12,6 +12,7 @@ The project is intentionally limited to static analysis preparation. It does not
 - No runtime enrichment from external services
 - Local config-driven capability mapping and suspicious string detection
 - Graceful handling for malformed files, non-PE files, and missing optional rule sets
+- Explicit degraded-mode reporting when optional local dependencies are unavailable
 
 ## Features
 
@@ -27,6 +28,8 @@ The project is intentionally limited to static analysis preparation. It does not
 - Rule-based capability inference from local JSON config
 - Local recursive YARA scanning with `yara-python`
 - Structured export artifacts for review and automation
+- Explicit per-step status reporting for PE, imports, section entropy, and YARA
+- Categorized suspicious string highlights for analyst review
 
 ## Repository Layout
 
@@ -70,7 +73,14 @@ python -m pip install --no-index --find-links ./wheelhouse -r requirements.txt
 python -m pip install --no-index --find-links ./wheelhouse -e .
 ```
 
-If `pefile` or `yara-python` are not installed, `staticprep` still runs, but PE parsing or YARA scanning are skipped with structured warnings in `report.json`.
+If `pefile` or `yara-python` are not installed, `staticprep` still runs in degraded mode. The report includes:
+
+- `environment.pefile_available`
+- `environment.yara_available`
+- `environment.degraded_mode`
+- `environment.degraded_reasons`
+
+Structured warnings are also recorded in `errors`, and the affected analysis sections include explicit `attempted`, `succeeded`, `skipped`, and `error` fields instead of relying on ambiguous empty data.
 
 ## Usage
 
@@ -101,10 +111,22 @@ Useful flags:
 
 ## Output Structure
 
-Each sample produces a self-contained output directory:
+Each sample produces a self-contained output directory. To reduce collisions across similarly named samples, the directory naming convention is:
 
 ```text
-output/<sample_name>/
+output/<sample_stem>_<short_sha256>/
+```
+
+Example:
+
+```text
+output/invoice_8f3a0d12/
+```
+
+Artifacts:
+
+```text
+output/<sample_stem>_<short_sha256>/
 ├─ report.json
 ├─ summary.md
 ├─ strings_ascii.txt
@@ -117,6 +139,7 @@ output/<sample_name>/
 `report.json` is the canonical machine-readable artifact. Its stable top-level keys are:
 
 - `sample`
+- `environment`
 - `hashes`
 - `strings`
 - `pe`
@@ -125,6 +148,40 @@ output/<sample_name>/
 - `yara`
 - `errors`
 - `generated_at`
+
+Additive Phase 2 fields include:
+
+- `environment`
+  - `python_version`
+  - `pefile_available`
+  - `yara_available`
+  - `degraded_mode`
+  - `degraded_reasons`
+- `pe`
+  - `attempted`
+  - `succeeded`
+  - `skipped`
+  - `error`
+  - `section_entropy`
+- `imports`
+  - `attempted`
+  - `succeeded`
+  - `skipped`
+  - `error`
+  - `by_dll`
+  - `flat`
+  - `total_import_count`
+  - `dll_count`
+- `strings.suspicious`
+  - `matches`
+  - `categorized`
+- `yara`
+  - `attempted`
+  - `succeeded`
+  - `skipped`
+  - `error`
+  - `rules_dir`
+  - `match_count`
 
 ## Capability Inference
 
@@ -135,6 +192,39 @@ Each capability result includes:
 - `matched`
 - `evidence`
 - `evidence_source`
+- `evidence_sources`
+- `confidence`
+
+`confidence` is deterministic and intentionally simple:
+
+- `high`: at least two evidence sources and at least three total evidence hits
+- `medium`: at least two total evidence hits
+- `low`: one or zero evidence hits
+
+## Suspicious String Categories
+
+Categorized suspicious string results are exported in `report.json` under `strings.suspicious.categorized`.
+
+Current categories:
+
+- `urls`
+- `ips`
+- `domains`
+- `registry_paths`
+- `file_paths`
+- `commands_or_lolbins`
+- `powershell`
+- `appdata_or_temp`
+- `other`
+
+Pattern matching remains local and config-driven through `config/suspicious_patterns.json`.
+
+## Assumptions and Limitations
+
+- Degraded mode depends only on local runtime availability of `pefile` and `yara-python`; no attempt is made to fetch missing dependencies.
+- Capability confidence is heuristic and intended only as a quick triage aid, not a probabilistic score.
+- Suspicious string categorization is regex-based and may produce overlaps or benign hits; analysts should treat it as prioritization support.
+- Non-PE files and malformed PEs are handled explicitly, but they will still produce empty import data because no import table could be parsed.
 
 ## Development
 

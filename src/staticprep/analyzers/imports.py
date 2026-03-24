@@ -12,4 +12,9 @@ def normalize_imports(imports_by_dll: dict[str, list[str]]) -> dict[str, Any]:
         for dll, apis in sorted(imports_by_dll.items(), key=lambda item: item[0].lower())
     }
     flat = sorted({api for apis in normalized.values() for api in apis})
-    return {"by_dll": normalized, "flat": flat}
+    return {
+        "by_dll": normalized,
+        "flat": flat,
+        "total_import_count": len(flat),
+        "dll_count": len(normalized),
+    }

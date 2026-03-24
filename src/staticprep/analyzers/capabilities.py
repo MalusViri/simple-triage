@@ -7,6 +7,15 @@ from typing import Any
 from staticprep.models import CapabilityResult
 
 
+def _determine_confidence(source_count: int, evidence_count: int) -> str:
+    """Return a simple deterministic confidence value based on evidence breadth."""
+    if source_count >= 2 and evidence_count >= 3:
+        return "high"
+    if evidence_count >= 2:
+        return "medium"
+    return "low"
+
+
 def infer_capabilities(
     capability_map: dict[str, Any],
     apis: list[str],
@@ -40,10 +49,13 @@ def infer_capabilities(
                 evidence.append(yara_indicator)
                 sources.append("YARA")
 
+        unique_sources = list(dict.fromkeys(sources))
         results[capability] = CapabilityResult(
             matched=bool(evidence),
             evidence=evidence,
-            evidence_source=sources,
+            evidence_source=unique_sources,
+            evidence_sources=unique_sources,
+            confidence=_determine_confidence(len(unique_sources), len(evidence)),
         )
 
     return results

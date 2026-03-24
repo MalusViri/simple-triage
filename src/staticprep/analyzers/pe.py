@@ -51,8 +51,14 @@ def analyze_pe(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
             imports_by_dll[dll_name] = apis
 
     pe_info = {
+        "attempted": True,
+        "succeeded": True,
+        "skipped": False,
+        "error": None,
         "is_pe": True,
-        "machine_type": pefile.MACHINE_TYPE.get(pe.FILE_HEADER.Machine, hex(pe.FILE_HEADER.Machine)),
+        "machine_type": pefile.MACHINE_TYPE.get(
+            pe.FILE_HEADER.Machine, hex(pe.FILE_HEADER.Machine)
+        ),
         "compile_timestamp": datetime.fromtimestamp(
             pe.FILE_HEADER.TimeDateStamp, tz=UTC
         ).isoformat(),
@@ -63,5 +69,11 @@ def analyze_pe(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         "image_base": hex(pe.OPTIONAL_HEADER.ImageBase),
         "number_of_sections": int(pe.FILE_HEADER.NumberOfSections),
         "sections": sections,
+        "section_entropy": {
+            "attempted": True,
+            "succeeded": True,
+            "skipped": False,
+            "error": None,
+        },
     }
     return pe_info, normalize_imports(imports_by_dll)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from staticprep.analyzers.yara_scan import run_yara_scan, yara
@@ -17,9 +15,14 @@ def test_yara_missing_directory_returns_warning(tmp_path):
 
     if yara is None:
         assert result["enabled"] is False
+        assert result["skipped"] is True
+        assert result["succeeded"] is False
+        assert result["error"] == "yara-python is not installed"
         assert errors[0]["severity"] == "warning"
     else:
         assert result["enabled"] is True
+        assert result["attempted"] is True
+        assert result["succeeded"] is False
         assert errors[0]["message"].startswith("Rules directory does not exist")
 
 
@@ -32,6 +35,8 @@ def test_yara_rule_loading_and_match_parsing(fixture_dir):
 
     assert errors == []
     assert result["enabled"] is True
+    assert result["succeeded"] is True
+    assert result["match_count"] == 1
     assert result["matches"] == [
         {
             "rule": "ContainsPowerShell",

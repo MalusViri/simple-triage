@@ -25,7 +25,16 @@ def _collect_rule_files(rules_dir: Path) -> list[Path]:
 def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """Scan a file with local YARA rules and return match data with structured errors."""
     if yara is None:
-        return {"enabled": False, "matches": []}, [
+        return {
+            "attempted": True,
+            "succeeded": False,
+            "skipped": True,
+            "error": "yara-python is not installed",
+            "enabled": False,
+            "rules_dir": str(rules_dir),
+            "match_count": 0,
+            "matches": [],
+        }, [
             {
                 "stage": "yara",
                 "message": "yara-python is not installed; skipping YARA scanning.",
@@ -34,7 +43,16 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
         ]
 
     if not rules_dir.exists():
-        return {"enabled": True, "matches": []}, [
+        return {
+            "attempted": True,
+            "succeeded": False,
+            "skipped": False,
+            "error": f"Rules directory does not exist: {rules_dir}",
+            "enabled": True,
+            "rules_dir": str(rules_dir),
+            "match_count": 0,
+            "matches": [],
+        }, [
             {
                 "stage": "yara",
                 "message": f"Rules directory does not exist: {rules_dir}",
@@ -44,7 +62,16 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
 
     rule_files = _collect_rule_files(rules_dir)
     if not rule_files:
-        return {"enabled": True, "matches": []}, [
+        return {
+            "attempted": True,
+            "succeeded": False,
+            "skipped": False,
+            "error": f"No YARA rules found in: {rules_dir}",
+            "enabled": True,
+            "rules_dir": str(rules_dir),
+            "match_count": 0,
+            "matches": [],
+        }, [
             {
                 "stage": "yara",
                 "message": f"No YARA rules found in: {rules_dir}",
@@ -70,7 +97,16 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
         compiled_namespaces[namespace] = str(rule_file)
 
     if not compiled_namespaces:
-        return {"enabled": True, "matches": []}, errors
+        return {
+            "attempted": True,
+            "succeeded": False,
+            "skipped": False,
+            "error": "No valid YARA rules were compiled.",
+            "enabled": True,
+            "rules_dir": str(rules_dir),
+            "match_count": 0,
+            "matches": [],
+        }, errors
 
     rules = yara.compile(filepaths=compiled_namespaces)
     matches = []
@@ -83,4 +119,13 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             }
         )
     matches.sort(key=lambda item: item["rule"])
-    return {"enabled": True, "matches": matches}, errors
+    return {
+        "attempted": True,
+        "succeeded": True,
+        "skipped": False,
+        "error": None,
+        "enabled": True,
+        "rules_dir": str(rules_dir),
+        "match_count": len(matches),
+        "matches": matches,
+    }, errors

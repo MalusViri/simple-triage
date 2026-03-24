@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -10,6 +11,13 @@ def sanitize_sample_name(path: Path) -> str:
     """Return a filesystem-safe output directory name for a sample."""
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", path.stem).strip("._")
     return safe_name or "sample"
+
+
+def build_output_directory_name(path: Path, short_sha256: str | None = None) -> str:
+    """Return a deterministic, collision-resistant sample output directory name."""
+    stem = sanitize_sample_name(path)
+    suffix = short_sha256 or hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:8]
+    return f"{stem}_{suffix}"
 
 
 def ensure_directory(path: Path) -> Path:
