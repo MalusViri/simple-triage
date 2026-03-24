@@ -1,0 +1,2 @@
+This is a safe test sample for staticprep.
+It contains powershell.exe and http://example.com for string and YARA testing.

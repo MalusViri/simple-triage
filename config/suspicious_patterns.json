@@ -1,0 +1,11 @@
+{
+  "url": "(?i)https?://[^\\s\"'<>]+",
+  "ipv4": "\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b",
+  "domain": "\\b[a-zA-Z0-9.-]+\\.(?:com|net|org|biz|info|ru|cn|top|xyz)\\b",
+  "registry_path": "(?i)hkey_(?:classes_root|current_user|local_machine|users|current_config)\\\\[^\\r\\n]+",
+  "temp_path": "(?i)%temp%|\\\\temp\\\\|appdata\\\\(?:local|roaming)",
+  "powershell": "(?i)powershell(?:\\.exe)?\\b",
+  "wscript": "(?i)\\b(?:wscript|cscript)(?:\\.exe)?\\b",
+  "lolbin": "(?i)\\b(?:rundll32|regsvr32|mshta|certutil|bitsadmin|wmic|schtasks)(?:\\.exe)?\\b",
+  "mutex_like": "(?i)\\b(?:global|local)\\\\[a-z0-9_.-]{4,}\\b"
+}

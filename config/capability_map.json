@@ -1,0 +1,134 @@
+{
+  "anti_analysis": {
+    "api": [
+      "IsDebuggerPresent",
+      "CheckRemoteDebuggerPresent",
+      "NtQueryInformationProcess"
+    ],
+    "strings": [
+      "sandbox",
+      "debugger",
+      "vmware",
+      "virtualbox"
+    ],
+    "yara": [
+      "anti_analysis"
+    ]
+  },
+  "downloader_behavior": {
+    "api": [
+      "URLDownloadToFileA",
+      "URLDownloadToFileW",
+      "InternetOpenA",
+      "InternetOpenW",
+      "WinHttpOpen"
+    ],
+    "strings": [
+      "http://",
+      "https://"
+    ],
+    "yara": [
+      "downloader"
+    ]
+  },
+  "networking": {
+    "api": [
+      "InternetConnectA",
+      "InternetConnectW",
+      "connect",
+      "WSAStartup",
+      "socket"
+    ],
+    "strings": [
+      "http://",
+      "https://",
+      "user-agent"
+    ],
+    "yara": [
+      "networking"
+    ]
+  },
+  "persistence": {
+    "api": [
+      "RegSetValueExA",
+      "RegSetValueExW",
+      "CreateServiceA",
+      "CreateServiceW",
+      "CopyFileA",
+      "CopyFileW"
+    ],
+    "strings": [
+      "run\\",
+      "startup",
+      "currentversion\\run"
+    ],
+    "yara": [
+      "persistence"
+    ]
+  },
+  "process_execution": {
+    "api": [
+      "CreateProcessA",
+      "CreateProcessW",
+      "WinExec",
+      "ShellExecuteA",
+      "ShellExecuteW"
+    ],
+    "strings": [
+      "cmd.exe",
+      "powershell",
+      "rundll32"
+    ],
+    "yara": [
+      "process_execution"
+    ]
+  },
+  "process_injection": {
+    "api": [
+      "VirtualAllocEx",
+      "WriteProcessMemory",
+      "CreateRemoteThread",
+      "NtMapViewOfSection"
+    ],
+    "strings": [
+      "writeprocessmemory",
+      "createremotethread"
+    ],
+    "yara": [
+      "process_injection"
+    ]
+  },
+  "registry_modification": {
+    "api": [
+      "RegCreateKeyExA",
+      "RegCreateKeyExW",
+      "RegSetValueExA",
+      "RegSetValueExW",
+      "RegDeleteValueA",
+      "RegDeleteValueW"
+    ],
+    "strings": [
+      "hkey_current_user",
+      "hkey_local_machine",
+      "software\\microsoft\\windows\\currentversion\\run"
+    ],
+    "yara": [
+      "registry"
+    ]
+  },
+  "service_creation": {
+    "api": [
+      "CreateServiceA",
+      "CreateServiceW",
+      "StartServiceA",
+      "StartServiceW"
+    ],
+    "strings": [
+      "createservice",
+      "startservice"
+    ],
+    "yara": [
+      "service_creation"
+    ]
+  }
+}
