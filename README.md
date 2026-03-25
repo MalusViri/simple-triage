@@ -33,6 +33,10 @@ The project is intentionally limited to static analysis preparation. It does not
 - Deterministic triage scoring and quick assessment summary
 - Packed/high-entropy assessment for PE sections
 - IOC-ready extraction and curated interesting-string preview
+- Artifact classification and IOC confidence filtering for analyst-facing highlights
+- Separation between analyst-ready findings, contextual findings, and raw exports
+- Interpretation notes for likely installer/packager and certificate-infrastructure noise
+- Cleaner YARA warning hygiene with partial-ruleset visibility
 
 ## Repository Layout
 
@@ -144,6 +148,8 @@ output/<sample_stem>_<short_sha256>/
 - `sample`
 - `environment`
 - `analysis_summary`
+- `findings`
+- `interpretation`
 - `packed_assessment`
 - `iocs`
 - `interesting_strings_preview`
@@ -217,6 +223,28 @@ Additive Phase 3 fields include:
   - `commands`
 - `interesting_strings_preview`
 
+Additive Phase 4 fields include:
+
+- `findings`
+  - `executive_summary`
+  - `analyst_ready`
+  - `contextual`
+  - `raw_references`
+- `interpretation`
+  - `notes`
+  - `codes`
+  - `summary`
+- `iocs`
+  - `classified`
+  - `high_confidence`
+  - `contextual`
+  - `raw_summary`
+- `yara`
+  - `warning_count`
+  - `warnings`
+  - `rule_stats`
+  - `scan_status`
+
 ## Capability Inference
 
 Capability inference is data-driven from `config/capability_map.json`. API names, string indicators, and YARA tags or rule names map to capability categories such as persistence, networking, process execution, and process injection.
@@ -228,12 +256,16 @@ Each capability result includes:
 - `evidence_source`
 - `evidence_sources`
 - `confidence`
+- `score`
+- `notes`
 
-`confidence` is deterministic and intentionally simple:
+`confidence` remains deterministic, but it is now weighted and stricter:
 
-- `high`: at least two evidence sources and at least three total evidence hits
-- `medium`: at least two total evidence hits
-- `low`: one or zero evidence hits
+- API, string, and YARA evidence each have local weights in `config/analysis_settings.json`
+- weak generic indicators such as bare `http://`, bare `https://`, `startup`, or isolated `debugger` references are down-weighted
+- per-capability thresholds can require stronger corroboration before a result becomes `medium` or `high`
+
+This reduces overstatement for capabilities that are supported only by weak generic strings.
 
 ## Analysis Summary and Severity
 
@@ -273,7 +305,7 @@ It includes:
 
 If PE parsing is unavailable, skipped, or unsuccessful, the section still appears with explicit state and error metadata.
 
-## IOC Extraction
+## IOC Extraction and Artifact Classification
 
 `iocs` provides a normalized offline-only extraction view intended for downstream analyst workflows and local automation.
 
@@ -287,7 +319,59 @@ Current IOC fields:
 - `mutexes`
 - `commands`
 
-These values are deduplicated and normalized where practical. No internet validation or enrichment is performed.
+These raw values remain deduplicated and normalized where practical. No internet validation or enrichment is performed.
+
+Phase 4 adds deterministic artifact classification so analyst-facing highlights can be more selective without deleting raw data. Supported classes include:
+
+- `high_confidence`
+- `low_confidence`
+- `malformed`
+- `trusted_pki`
+- `likely_build_artifact`
+- `likely_installer_artifact`
+- `contextual_only`
+
+Examples of current filtering behavior:
+
+- CRL, OCSP, and signer infrastructure URLs are downgraded into `trusted_pki`
+- malformed domains or malformed Windows paths are labeled instead of highlighted
+- manifest-like version values such as `1.0.0.0` are treated as contextual IP noise
+- build and installer artifacts are separated from stronger analyst highlights
+
+`iocs.high_confidence` and `iocs.contextual` are curated subsets. `iocs.classified` and the original raw IOC lists remain available for transparency.
+
+## Analyst-Ready vs Raw Findings
+
+`summary.md` now separates:
+
+- quick assessment
+- analyst-ready findings
+- contextual / low-confidence findings
+- interpretation notes
+- IOC highlights
+- raw findings references
+
+`report.json` mirrors this with the additive `findings` section:
+
+- `findings.executive_summary` for first-screen triage
+- `findings.analyst_ready` for stronger findings
+- `findings.contextual` for weaker or benign-context findings
+- `findings.raw_references` for counts and raw artifact references
+
+Raw exports such as `strings_ascii.txt`, `strings_utf16.txt`, `suspicious_strings.txt`, `imports.json`, and `yara_matches.json` are unchanged and remain available.
+
+## Interpretation Guardrails
+
+`interpretation` adds cautious false-positive guardrails. It does not assign malware or benign verdicts.
+
+Current note families include:
+
+- `likely_installer_or_packaged_app`
+- `possible_electron_nsis_tauri_characteristics`
+- `suspiciousness_may_reflect_compression_or_installer_behavior`
+- `certificate_or_signing_infrastructure_present`
+
+These notes are derived only from local deterministic heuristics such as installer strings, PKI-related artifacts, and high-entropy sections without stronger corroboration.
 
 ## YARA Externals
 
@@ -313,12 +397,32 @@ rule MatchExeByExternal
 
 `interesting_strings_preview` is a short curated list of higher-value strings for quick review. It prefers categories such as:
 
-- URLs
+- high-confidence URLs
+- high-confidence commands
 - PowerShell
-- suspicious commands and LOLBins
-- registry paths
-- appdata/temp paths
-- file paths
+- high-confidence registry paths
+- high-confidence domains
+- contextual command strings when stronger highlights are absent
+
+## Tuning
+
+Most Phase 4 filtering and weighting behavior is configured locally in `config/analysis_settings.json`.
+
+Key sections:
+
+- `analyst_highlight_limits`
+- `artifact_filters.trusted_pki_domains_or_patterns`
+- `artifact_filters.build_artifact_patterns`
+- `artifact_filters.installer_artifact_patterns`
+- `artifact_filters.contextual_ip_values`
+- `artifact_filters.command_high_confidence_terms`
+- `capabilities.source_weights`
+- `capabilities.weak_indicators`
+- `capabilities.per_capability_overrides`
+- `interpretation.installer_or_packager_patterns`
+- `yara_reporting`
+
+These settings are intended to be tuned against a broader local sample set without introducing network access or nondeterministic behavior.
 
 ## Suspicious String Categories
 

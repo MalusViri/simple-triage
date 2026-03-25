@@ -1,8 +1,13 @@
-"""Tests for triage scoring and entropy assessment."""
+"""Tests for triage scoring, findings, entropy assessment, and interpretation."""
 
 from __future__ import annotations
 
-from staticprep.analyzers.prioritization import assess_packed_status, build_analysis_summary
+from staticprep.analyzers.interpretation import build_interpretation
+from staticprep.analyzers.prioritization import (
+    assess_packed_status,
+    build_analysis_summary,
+    build_findings,
+)
 from staticprep.config import load_analysis_settings
 
 
@@ -27,7 +32,7 @@ def test_assess_packed_status_flags_high_entropy_sections():
     assert result["threshold_used"] == 7.2
 
 
-def test_build_analysis_summary_is_deterministic():
+def test_build_analysis_summary_uses_curated_ioc_views():
     settings = load_analysis_settings()
     capabilities = {
         "networking": {
@@ -41,16 +46,30 @@ def test_build_analysis_summary_is_deterministic():
             "evidence": ["Run\\"],
         },
     }
-    suspicious_categories = {
-        "urls": ["http://example.com"],
-        "ips": [],
-        "domains": ["example.com"],
-        "registry_paths": ["HKEY_CURRENT_USER\\Software\\Test"],
-        "file_paths": [],
-        "commands_or_lolbins": ["cmd.exe"],
-        "powershell": ["powershell.exe"],
-        "appdata_or_temp": [],
-        "other": [],
+    iocs = {
+        "high_confidence": {
+            "urls": [{"value": "http://evil.example", "classification": "high_confidence"}],
+            "ips": [],
+            "domains": [],
+            "registry_paths": [
+                {
+                    "value": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "classification": "high_confidence",
+                }
+            ],
+            "file_paths": [],
+            "mutexes": [],
+            "commands": [{"value": "powershell.exe -enc AAA", "classification": "high_confidence"}],
+        },
+        "contextual": {
+            "urls": [{"value": "http://ocsp.digicert.com", "classification": "trusted_pki"}],
+            "ips": [],
+            "domains": [],
+            "registry_paths": [],
+            "file_paths": [],
+            "mutexes": [],
+            "commands": [],
+        },
     }
     yara_results = {
         "match_count": 1,
@@ -64,7 +83,7 @@ def test_build_analysis_summary_is_deterministic():
 
     result = build_analysis_summary(
         capabilities=capabilities,
-        suspicious_categories=suspicious_categories,
+        iocs=iocs,
         yara_results=yara_results,
         packed_assessment=packed_assessment,
         environment=environment,
@@ -72,25 +91,34 @@ def test_build_analysis_summary_is_deterministic():
     )
 
     assert result["severity"] == "high"
-    assert result["score"] == 98
+    assert result["score"] == 91
     assert result["recommended_next_step"] == "investigate_deeper"
-    assert "1 YARA match(es)" in result["reasons"]
+    assert "1 high-confidence URL indicator(s)" in result["reasons"]
 
 
 def test_build_analysis_summary_accounts_for_degraded_mode():
     settings = load_analysis_settings()
     result = build_analysis_summary(
         capabilities={},
-        suspicious_categories={
-            "urls": [],
-            "ips": [],
-            "domains": [],
-            "registry_paths": [],
-            "file_paths": [],
-            "commands_or_lolbins": [],
-            "powershell": [],
-            "appdata_or_temp": [],
-            "other": [],
+        iocs={
+            "high_confidence": {
+                "urls": [],
+                "ips": [],
+                "domains": [],
+                "registry_paths": [],
+                "file_paths": [],
+                "mutexes": [],
+                "commands": [],
+            },
+            "contextual": {
+                "urls": [],
+                "ips": [],
+                "domains": [],
+                "registry_paths": [],
+                "file_paths": [],
+                "mutexes": [],
+                "commands": [],
+            },
         },
         yara_results={"match_count": 0, "matches": []},
         packed_assessment={"high_entropy_sections": [], "likely_packed": False},
@@ -101,3 +129,95 @@ def test_build_analysis_summary_accounts_for_degraded_mode():
     assert result["severity"] == "low"
     assert result["score"] == 0
     assert result["top_findings"] == ["Analysis ran in degraded mode"]
+
+
+def test_build_interpretation_adds_packager_guardrails():
+    settings = load_analysis_settings()
+    interpretation = build_interpretation(
+        all_strings=["Nullsoft Installer", "Electron", "OCSP", "CRL", "app.asar"],
+        iocs={
+            "raw_summary": {
+                "by_classification": {
+                    "trusted_pki": 2,
+                    "likely_installer_artifact": 2,
+                }
+            }
+        },
+        packed_assessment={"likely_packed": True, "high_entropy_sections": [{"name": ".ndata"}]},
+        capabilities={"networking": {"matched": False, "confidence": "low"}},
+        yara_results={"match_count": 0},
+        analysis_settings=settings,
+    )
+
+    assert "likely_installer_or_packaged_app" in interpretation["codes"]
+    assert "possible_electron_nsis_tauri_characteristics" in interpretation["codes"]
+    assert "certificate_or_signing_infrastructure_present" in interpretation["codes"]
+    assert "suspiciousness_may_reflect_compression_or_installer_behavior" in interpretation["codes"]
+
+
+def test_build_findings_separates_analyst_ready_and_contextual_views():
+    settings = load_analysis_settings()
+    analysis_summary = {
+        "recommended_next_step": "review_manually",
+        "severity": "medium",
+        "score": 42,
+        "top_findings": ["High-confidence capabilities: networking"],
+    }
+    findings = build_findings(
+        analysis_summary=analysis_summary,
+        capabilities={
+            "networking": {
+                "matched": True,
+                "confidence": "high",
+                "evidence": ["connect"],
+                "score": 7,
+                "notes": [],
+            },
+            "persistence": {
+                "matched": True,
+                "confidence": "low",
+                "evidence": ["startup"],
+                "score": 1,
+                "notes": ["weak_generic_indicator"],
+            },
+        },
+        iocs={
+            "high_confidence": {
+                "urls": [{"value": "http://evil.example", "classification": "high_confidence", "reasons": ["valid_network_indicator"]}],
+                "ips": [],
+                "domains": [],
+                "registry_paths": [],
+                "file_paths": [],
+                "mutexes": [],
+                "commands": [],
+            },
+            "contextual": {
+                "urls": [{"value": "http://ocsp.digicert.com", "classification": "trusted_pki", "reasons": ["certificate_or_revocation_infrastructure"]}],
+                "ips": [],
+                "domains": [],
+                "registry_paths": [],
+                "file_paths": [],
+                "mutexes": [],
+                "commands": [],
+            },
+            "raw_summary": {"total": 2},
+        },
+        interpretation={
+            "notes": [
+                {
+                    "code": "certificate_or_signing_infrastructure_present",
+                    "summary": "PKI artifacts are present.",
+                    "evidence": ["trusted_pki_iocs=1"],
+                }
+            ]
+        },
+        yara_results={"match_count": 0, "matches": []},
+        packed_assessment={"likely_packed": False, "high_entropy_sections": [], "rationale": "none"},
+        errors=[],
+        analysis_settings=settings,
+    )
+
+    assert findings["executive_summary"]["worth_deeper_investigation"] is True
+    assert any(item["type"] == "capability" for item in findings["analyst_ready"])
+    assert any(item["type"] == "ioc" for item in findings["analyst_ready"])
+    assert any(item["type"] == "interpretation" for item in findings["contextual"])

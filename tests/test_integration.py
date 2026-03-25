@@ -40,9 +40,11 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "capabilities",
         "environment",
         "errors",
+        "findings",
         "generated_at",
         "hashes",
         "interesting_strings_preview",
+        "interpretation",
         "imports",
         "iocs",
         "packed_assessment",
@@ -70,11 +72,15 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "urls",
     ]
     assert sorted(report_json["iocs"].keys()) == [
+        "classified",
         "commands",
+        "contextual",
         "domains",
         "file_paths",
+        "high_confidence",
         "ips",
         "mutexes",
+        "raw_summary",
         "registry_paths",
         "urls",
     ]
@@ -85,15 +91,26 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "severity",
         "top_findings",
     ]
+    assert sorted(report_json["findings"].keys()) == [
+        "analyst_ready",
+        "contextual",
+        "executive_summary",
+        "raw_references",
+    ]
+    assert sorted(report_json["interpretation"].keys()) == ["codes", "notes", "summary"]
     assert "## Quick Assessment" in summary
     assert "## Top Findings" in summary
+    assert "## Analyst-Ready Findings" in summary
+    assert "## Contextual / Low-Confidence Findings" in summary
+    assert "## Interpretation Notes" in summary
+    assert "## Raw Findings References" in summary
     assert "## Environment and Degraded Mode" in summary
-    assert "## Likely Packed Assessment" in summary
-    assert "## Suspicious Strings Highlights" in summary
-    assert "## Capability Highlights" in summary
     assert "## IOC Highlights" in summary
+    assert "## YARA Status" in summary
     assert report.sample["name"] == "note.txt"
     assert isinstance(report_json["interesting_strings_preview"], list)
+    assert "raw_summary" in report_json["iocs"]
+    assert "warning_count" in report_json["yara"]
 
 
 def test_degraded_mode_reporting_when_dependencies_missing(tmp_path, fixture_dir, monkeypatch):

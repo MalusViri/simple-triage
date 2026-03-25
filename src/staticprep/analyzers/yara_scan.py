@@ -45,6 +45,14 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             "rules_dir": str(rules_dir),
             "match_count": 0,
             "matches": [],
+            "warning_count": 1,
+            "warnings": ["yara-python is not installed; scanning skipped"],
+            "rule_stats": {
+                "discovered": 0,
+                "valid": 0,
+                "invalid": 0,
+            },
+            "scan_status": "skipped_dependency_unavailable",
         }, [
             {
                 "stage": "yara",
@@ -63,6 +71,14 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             "rules_dir": str(rules_dir),
             "match_count": 0,
             "matches": [],
+            "warning_count": 1,
+            "warnings": [f"Rules directory does not exist: {rules_dir}"],
+            "rule_stats": {
+                "discovered": 0,
+                "valid": 0,
+                "invalid": 0,
+            },
+            "scan_status": "failed_missing_rules_directory",
         }, [
             {
                 "stage": "yara",
@@ -82,6 +98,14 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             "rules_dir": str(rules_dir),
             "match_count": 0,
             "matches": [],
+            "warning_count": 1,
+            "warnings": [f"No YARA rules found in: {rules_dir}"],
+            "rule_stats": {
+                "discovered": 0,
+                "valid": 0,
+                "invalid": 0,
+            },
+            "scan_status": "failed_no_rules_found",
         }, [
             {
                 "stage": "yara",
@@ -117,6 +141,14 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             "rules_dir": str(rules_dir),
             "match_count": 0,
             "matches": [],
+            "warning_count": len(errors),
+            "warnings": [error["message"] for error in errors],
+            "rule_stats": {
+                "discovered": len(rule_files),
+                "valid": 0,
+                "invalid": len(errors),
+            },
+            "scan_status": "failed_all_rules_invalid",
         }, errors
 
     rules = yara.compile(filepaths=compiled_namespaces, externals=externals)
@@ -139,4 +171,12 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
         "rules_dir": str(rules_dir),
         "match_count": len(matches),
         "matches": matches,
+        "warning_count": len(errors),
+        "warnings": [error["message"] for error in errors],
+        "rule_stats": {
+            "discovered": len(rule_files),
+            "valid": len(compiled_namespaces),
+            "invalid": len(errors),
+        },
+        "scan_status": "completed_with_partial_rule_issues" if errors else "completed",
     }, errors

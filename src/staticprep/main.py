@@ -10,9 +10,14 @@ from typing import Any
 
 from staticprep.analyzers.capabilities import infer_capabilities
 from staticprep.analyzers.hashes import compute_hashes
-from staticprep.analyzers.iocs import build_interesting_strings_preview, extract_iocs
+from staticprep.analyzers.interpretation import build_interpretation
+from staticprep.analyzers.iocs import build_interesting_strings_preview, classify_iocs, extract_iocs
 from staticprep.analyzers import pe as pe_analyzer
-from staticprep.analyzers.prioritization import assess_packed_status, build_analysis_summary
+from staticprep.analyzers.prioritization import (
+    assess_packed_status,
+    build_analysis_summary,
+    build_findings,
+)
 from staticprep.analyzers.strings import extract_strings_from_file, filter_suspicious_strings
 from staticprep.analyzers.yara_scan import run_yara_scan, yara as yara_module
 from staticprep.config import (
@@ -206,6 +211,14 @@ def analyze_sample(
         "rules_dir": str(rules_dir or DEFAULT_RULES_DIR),
         "match_count": 0,
         "matches": [],
+        "warning_count": 0,
+        "warnings": [],
+        "rule_stats": {
+            "discovered": 0,
+            "valid": 0,
+            "invalid": 0,
+        },
+        "scan_status": "skipped_by_flag" if skip_yara else "not_started",
     }
     if not skip_yara:
         raw_yara, yara_errors = run_yara_scan(sample_path, rules_dir or DEFAULT_RULES_DIR)
@@ -217,6 +230,7 @@ def analyze_sample(
         apis=imports["flat"],
         strings=[match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings,
         yara_matches=yara_results["matches"],
+        capability_settings=analysis_settings["capabilities"],
     )
     capabilities_dict = {
         name: {
@@ -225,12 +239,16 @@ def analyze_sample(
             "evidence_source": result.evidence_source,
             "evidence_sources": result.evidence_sources,
             "confidence": result.confidence,
+            "score": result.score,
+            "notes": result.notes,
         }
         for name, result in capabilities.items()
     }
 
     packed_assessment = assess_packed_status(pe_info, analysis_settings)
-    iocs = extract_iocs(suspicious_strings, suspicious_categories)
+    raw_iocs = extract_iocs(suspicious_strings, suspicious_categories)
+    ioc_views = classify_iocs(raw_iocs, analysis_settings)
+    iocs = {**raw_iocs, **ioc_views}
     interesting_strings_preview = build_interesting_strings_preview(
         suspicious_categories,
         iocs,
@@ -238,10 +256,31 @@ def analyze_sample(
     )
     analysis_summary = build_analysis_summary(
         capabilities=capabilities_dict,
-        suspicious_categories=suspicious_categories,
+        iocs=iocs,
         yara_results=yara_results,
         packed_assessment=packed_assessment,
         environment=environment,
+        analysis_settings=analysis_settings,
+    )
+    interpretation = build_interpretation(
+        all_strings=[match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings,
+        iocs=iocs,
+        packed_assessment=packed_assessment,
+        capabilities=capabilities_dict,
+        yara_results=yara_results,
+        analysis_settings=analysis_settings,
+    )
+    findings = build_findings(
+        analysis_summary=analysis_summary,
+        capabilities=capabilities_dict,
+        iocs=iocs,
+        interpretation=interpretation,
+        yara_results=yara_results,
+        packed_assessment=packed_assessment,
+        errors=[
+            {"stage": error.stage, "message": error.message, "severity": error.severity}
+            for error in errors
+        ],
         analysis_settings=analysis_settings,
     )
 
@@ -249,6 +288,8 @@ def analyze_sample(
         sample=metadata,
         environment=environment,
         analysis_summary=analysis_summary,
+        findings=findings,
+        interpretation=interpretation,
         packed_assessment=packed_assessment,
         iocs=iocs,
         interesting_strings_preview=interesting_strings_preview,

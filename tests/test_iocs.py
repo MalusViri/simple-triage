@@ -1,8 +1,13 @@
-"""Tests for IOC extraction and string previews."""
+"""Tests for IOC extraction, filtering, and string previews."""
 
 from __future__ import annotations
 
-from staticprep.analyzers.iocs import build_interesting_strings_preview, extract_iocs
+from staticprep.analyzers.iocs import (
+    build_interesting_strings_preview,
+    classify_iocs,
+    extract_iocs,
+)
+from staticprep.config import load_analysis_settings
 
 
 def test_extract_iocs_deduplicates_and_normalizes():
@@ -32,12 +37,53 @@ def test_extract_iocs_deduplicates_and_normalizes():
     assert result["commands"] == ["powershell.exe -enc AAA"]
 
 
+def test_classify_iocs_downgrades_trusted_pki_and_manifest_like_noise():
+    settings = load_analysis_settings()
+    raw_iocs = {
+        "urls": ["http://ocsp.digicert.com/status"],
+        "ips": ["1.0.0.0"],
+        "domains": ["example-.com"],
+        "registry_paths": [],
+        "file_paths": ["C:\\build\\release\\app.pdb"],
+        "mutexes": [],
+        "commands": ["powershell.exe -enc AAA"],
+    }
+
+    result = classify_iocs(raw_iocs, settings)
+
+    assert result["classified"]["urls"][0]["classification"] == "trusted_pki"
+    assert result["classified"]["ips"][0]["classification"] == "contextual_only"
+    assert result["classified"]["domains"][0]["classification"] == "malformed"
+    assert result["classified"]["file_paths"][0]["classification"] == "likely_build_artifact"
+    assert result["high_confidence"]["urls"] == []
+    assert result["high_confidence"]["commands"][0]["classification"] == "high_confidence"
+
+
+def test_config_driven_ioc_filtering_can_reclassify_entries():
+    settings = load_analysis_settings()
+    settings["artifact_filters"]["trusted_pki_domains_or_patterns"].append("example.com")
+    raw_iocs = {
+        "urls": ["https://example.com/crl"],
+        "ips": [],
+        "domains": ["example.com"],
+        "registry_paths": [],
+        "file_paths": [],
+        "mutexes": [],
+        "commands": [],
+    }
+
+    result = classify_iocs(raw_iocs, settings)
+
+    assert result["classified"]["urls"][0]["classification"] == "trusted_pki"
+    assert result["classified"]["domains"][0]["classification"] == "trusted_pki"
+
+
 def test_interesting_strings_preview_prefers_high_value_categories():
     categorized = {
         "urls": ["http://example.com"],
         "ips": [],
         "domains": ["example.com"],
-        "registry_paths": ["HKEY_CURRENT_USER\\Software\\Test"],
+        "registry_paths": ["HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"],
         "file_paths": ["C:\\Temp\\dropper.exe"],
         "commands_or_lolbins": ["cmd.exe"],
         "powershell": ["powershell.exe"],
@@ -45,20 +91,36 @@ def test_interesting_strings_preview_prefers_high_value_categories():
         "other": [],
     }
     iocs = {
-        "urls": ["http://example.com"],
-        "ips": [],
-        "domains": ["example.com"],
-        "registry_paths": ["HKEY_CURRENT_USER\\Software\\Test"],
-        "file_paths": ["C:\\Temp\\dropper.exe"],
-        "mutexes": [],
-        "commands": ["powershell.exe -enc AAA", "cmd.exe /c whoami"],
+        "high_confidence": {
+            "urls": [{"value": "http://example.com", "classification": "high_confidence"}],
+            "ips": [],
+            "domains": [{"value": "example.com", "classification": "high_confidence"}],
+            "registry_paths": [
+                {
+                    "value": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "classification": "high_confidence",
+                }
+            ],
+            "file_paths": [],
+            "mutexes": [],
+            "commands": [{"value": "powershell.exe -enc AAA", "classification": "high_confidence"}],
+        },
+        "contextual": {
+            "urls": [],
+            "ips": [],
+            "domains": [],
+            "registry_paths": [],
+            "file_paths": [],
+            "mutexes": [],
+            "commands": [{"value": "cmd.exe /c whoami", "classification": "low_confidence"}],
+        },
     }
 
     result = build_interesting_strings_preview(categorized, iocs, limit=4)
 
     assert result == [
         "http://example.com",
-        "powershell.exe",
         "powershell.exe -enc AAA",
-        "cmd.exe /c whoami",
+        "powershell.exe",
+        "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
     ]

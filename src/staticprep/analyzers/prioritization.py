@@ -1,4 +1,4 @@
-"""Analysis summary and entropy assessment helpers."""
+"""Analysis summary and analyst-facing finding helpers."""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def assess_packed_status(
 
 def build_analysis_summary(
     capabilities: dict[str, dict[str, Any]],
-    suspicious_categories: dict[str, list[str]],
+    iocs: dict[str, Any],
     yara_results: dict[str, Any],
     packed_assessment: dict[str, Any],
     environment: dict[str, Any],
@@ -125,21 +125,29 @@ def build_analysis_summary(
         reasons.append("Entropy profile suggests the sample may be packed")
         top_findings.append("Likely packed based on PE section entropy")
 
-    if suspicious_categories.get("urls"):
-        score += len(suspicious_categories["urls"]) * weights["suspicious_url"]
-        reasons.append(f"{len(suspicious_categories['urls'])} URL indicator(s)")
-    if suspicious_categories.get("registry_paths"):
-        score += len(suspicious_categories["registry_paths"]) * weights["suspicious_registry_path"]
-        reasons.append(f"{len(suspicious_categories['registry_paths'])} registry path indicator(s)")
-    if suspicious_categories.get("commands_or_lolbins"):
-        score += len(suspicious_categories["commands_or_lolbins"]) * weights["suspicious_command"]
-        reasons.append(
-            f"{len(suspicious_categories['commands_or_lolbins'])} command or LOLBin indicator(s)"
-        )
-    if suspicious_categories.get("powershell"):
-        score += len(suspicious_categories["powershell"]) * weights["suspicious_powershell"]
-        reasons.append(f"{len(suspicious_categories['powershell'])} PowerShell indicator(s)")
-        top_findings.append("PowerShell-related strings were identified")
+    high_iocs = iocs.get("high_confidence", {})
+    contextual_iocs = iocs.get("contextual", {})
+
+    url_count = len(high_iocs.get("urls", []))
+    registry_count = len(high_iocs.get("registry_paths", []))
+    command_count = len(high_iocs.get("commands", []))
+
+    if url_count:
+        score += url_count * weights["suspicious_url"]
+        reasons.append(f"{url_count} high-confidence URL indicator(s)")
+        top_findings.append("High-confidence network indicators were identified")
+    if registry_count:
+        score += registry_count * weights["suspicious_registry_path"]
+        reasons.append(f"{registry_count} high-confidence registry path indicator(s)")
+        top_findings.append("Persistence-relevant registry paths were identified")
+    if command_count:
+        score += command_count * weights["suspicious_command"]
+        reasons.append(f"{command_count} high-confidence command indicator(s)")
+        top_findings.append("Strong suspicious command strings were identified")
+    if contextual_iocs.get("commands"):
+        score += len(contextual_iocs["commands"]) * weights["contextual_command"]
+        reasons.append(f"{len(contextual_iocs['commands'])} low-confidence command indicator(s)")
+        top_findings.append("Command-like strings were identified but some are contextual only")
 
     if environment.get("degraded_mode"):
         score += weights["degraded_mode_penalty"]
@@ -166,4 +174,128 @@ def build_analysis_summary(
         "top_findings": top_findings[:5],
         "reasons": reasons[:10],
         "recommended_next_step": recommended_next_step,
+    }
+
+
+def build_findings(
+    analysis_summary: dict[str, Any],
+    capabilities: dict[str, dict[str, Any]],
+    iocs: dict[str, Any],
+    interpretation: dict[str, Any],
+    yara_results: dict[str, Any],
+    packed_assessment: dict[str, Any],
+    errors: list[dict[str, Any]],
+    analysis_settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Build curated analyst-ready and contextual finding groups."""
+    limit = analysis_settings["analyst_highlight_limits"]["top_findings"]
+    contextual_limit = analysis_settings["analyst_highlight_limits"]["contextual_findings"]
+
+    analyst_ready: list[dict[str, Any]] = []
+    contextual: list[dict[str, Any]] = []
+
+    for capability, data in sorted(capabilities.items()):
+        if not data["matched"]:
+            continue
+        finding = {
+            "type": "capability",
+            "name": capability,
+            "confidence": data["confidence"],
+            "evidence": data["evidence"][:3],
+            "score": data.get("score", 0),
+            "notes": data.get("notes", []),
+        }
+        if data["confidence"] in {"high", "medium"}:
+            analyst_ready.append(finding)
+        else:
+            contextual.append(finding)
+
+    for artifact_type, entries in sorted(iocs.get("high_confidence", {}).items()):
+        for entry in entries:
+            analyst_ready.append(
+                {
+                    "type": "ioc",
+                    "name": artifact_type,
+                    "confidence": "high",
+                    "evidence": [entry["value"]],
+                    "classification": entry["classification"],
+                    "notes": entry["reasons"],
+                }
+            )
+
+    for artifact_type, entries in sorted(iocs.get("contextual", {}).items()):
+        for entry in entries:
+            contextual.append(
+                {
+                    "type": "ioc",
+                    "name": artifact_type,
+                    "confidence": "contextual",
+                    "evidence": [entry["value"]],
+                    "classification": entry["classification"],
+                    "notes": entry["reasons"],
+                }
+            )
+
+    for note in interpretation.get("notes", []):
+        contextual.append(
+            {
+                "type": "interpretation",
+                "name": note["code"],
+                "confidence": "contextual",
+                "evidence": note.get("evidence", [])[:3],
+                "notes": [note["summary"]],
+            }
+        )
+
+    if yara_results.get("match_count", 0):
+        analyst_ready.append(
+            {
+                "type": "yara",
+                "name": "yara_matches",
+                "confidence": "high",
+                "evidence": [match["rule"] for match in yara_results["matches"][:3]],
+                "notes": ["Local YARA rules matched the sample"],
+            }
+        )
+
+    if packed_assessment.get("likely_packed"):
+        contextual.append(
+            {
+                "type": "packing",
+                "name": "likely_packed",
+                "confidence": "contextual",
+                "evidence": [
+                    section["name"] for section in packed_assessment.get("high_entropy_sections", [])[:3]
+                ],
+                "notes": [packed_assessment["rationale"]],
+            }
+        )
+
+    executive_summary = {
+        "worth_deeper_investigation": analysis_summary["recommended_next_step"] != "archive",
+        "recommended_next_step": analysis_summary["recommended_next_step"],
+        "severity": analysis_summary["severity"],
+        "score": analysis_summary["score"],
+        "analysis_degraded": any(error["stage"] == "environment" for error in errors),
+        "top_findings": analysis_summary["top_findings"],
+    }
+
+    raw_references = {
+        "suspicious_string_count": iocs["raw_summary"]["total"],
+        "ioc_raw_summary": iocs["raw_summary"],
+        "artifact_files": [
+            "report.json",
+            "strings_ascii.txt",
+            "strings_utf16.txt",
+            "suspicious_strings.txt",
+            "imports.json",
+            "yara_matches.json",
+        ],
+    }
+
+    return {
+        "executive_summary": executive_summary,
+        "analyst_ready": analyst_ready[:limit],
+        "contextual": contextual[:contextual_limit],
+        "raw_references": raw_references,
     }

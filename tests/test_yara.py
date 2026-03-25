@@ -18,11 +18,13 @@ def test_yara_missing_directory_returns_warning(tmp_path):
         assert result["skipped"] is True
         assert result["succeeded"] is False
         assert result["error"] == "yara-python is not installed"
+        assert result["scan_status"] == "skipped_dependency_unavailable"
         assert errors[0]["severity"] == "warning"
     else:
         assert result["enabled"] is True
         assert result["attempted"] is True
         assert result["succeeded"] is False
+        assert result["scan_status"] == "failed_missing_rules_directory"
         assert errors[0]["message"].startswith("Rules directory does not exist")
 
 
@@ -49,6 +51,7 @@ def test_yara_rule_loading_and_match_parsing(fixture_dir):
     assert errors == []
     assert result["enabled"] is True
     assert result["succeeded"] is True
+    assert result["scan_status"] == "completed"
     assert result["match_count"] == 1
     assert result["matches"] == [
         {
@@ -93,8 +96,50 @@ rule MatchExtension
 
     assert errors == []
     assert result["succeeded"] is True
+    assert result["rule_stats"]["valid"] == 1
     assert [match["rule"] for match in result["matches"]] == [
         "MatchExtension",
         "MatchFilename",
         "MatchFilepath",
     ]
+
+
+@pytest.mark.skipif(yara is None, reason="yara-python is not installed")
+def test_yara_reports_partial_ruleset_issues_cleanly(tmp_path):
+    sample = tmp_path / "demo.bin"
+    sample.write_bytes(b"powershell demo")
+    rules_dir = tmp_path / "rules"
+    rules_dir.mkdir()
+    (rules_dir / "good.yar").write_text(
+        """
+rule GoodRule
+{
+    strings:
+        $a = "powershell"
+    condition:
+        $a
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    (rules_dir / "bad.yar").write_text(
+        """
+rule BadRule
+{
+    condition:
+        this is not valid yara
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result, errors = run_yara_scan(sample, rules_dir)
+
+    assert result["succeeded"] is True
+    assert result["scan_status"] == "completed_with_partial_rule_issues"
+    assert result["warning_count"] == 1
+    assert result["rule_stats"] == {"discovered": 2, "valid": 1, "invalid": 1}
+    assert result["matches"][0]["rule"] == "GoodRule"
+    assert len(errors) == 1

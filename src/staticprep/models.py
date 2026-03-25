@@ -32,6 +32,8 @@ class CapabilityResult:
     evidence_source: list[str] = field(default_factory=list)
     evidence_sources: list[str] = field(default_factory=list)
     confidence: str = "low"
+    score: int = 0
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -41,6 +43,8 @@ class AnalysisReport:
     sample: dict[str, Any]
     environment: dict[str, Any]
     analysis_summary: dict[str, Any]
+    findings: dict[str, Any]
+    interpretation: dict[str, Any]
     packed_assessment: dict[str, Any]
     iocs: dict[str, Any]
     interesting_strings_preview: list[str]

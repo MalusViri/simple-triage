@@ -6,10 +6,22 @@ from pathlib import Path
 from typing import Any
 
 
+def _format_artifact_entries(entries: list[dict[str, Any]]) -> str:
+    """Return a short artifact summary string for markdown output."""
+    if not entries:
+        return "none"
+    formatted = []
+    for entry in entries[:3]:
+        formatted.append(f"{entry['value']} ({entry['classification']})")
+    return ", ".join(formatted)
+
+
 def build_summary_markdown(report: dict[str, Any]) -> str:
-    """Build a concise analyst-facing markdown summary."""
+    """Build a curated analyst-facing markdown summary."""
     sample = report["sample"]
     analysis_summary = report["analysis_summary"]
+    findings = report["findings"]
+    interpretation = report["interpretation"]
     environment = report["environment"]
     packed_assessment = report["packed_assessment"]
     iocs = report["iocs"]
@@ -17,48 +29,107 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
     hashes = report["hashes"]
     strings = report["strings"]
     yara = report["yara"]
-    matched_caps = sorted(
-        [
-            (name, result["confidence"], result["evidence"][:3])
-            for name, result in report["capabilities"].items()
-            if result["matched"]
-        ],
-        key=lambda item: {"high": 0, "medium": 1, "low": 2}[item[1]],
-    )
-    suspicious = strings["suspicious"]["categorized"]
-    suspicious_summary = []
-    for category in [
-        "urls",
-        "ips",
-        "domains",
-        "registry_paths",
-        "file_paths",
-        "commands_or_lolbins",
-        "powershell",
-        "appdata_or_temp",
-        "other",
-    ]:
-        values = suspicious.get(category, [])
-        if values:
-            suspicious_summary.append(f"- {category.replace('_', ' ').title()}: `{', '.join(values[:3])}`")
 
     lines = [
         "# staticprep Summary",
         "",
         "## Quick Assessment",
         "",
-        f"- Worth deeper investigation: `{analysis_summary['recommended_next_step'] != 'archive'}`",
+        f"- Worth deeper investigation: `{findings['executive_summary']['worth_deeper_investigation']}`",
         f"- Severity: `{analysis_summary['severity']}`",
         f"- Score: `{analysis_summary['score']}`",
         f"- Recommended next step: `{analysis_summary['recommended_next_step']}`",
+        f"- Analysis degraded: `{findings['executive_summary']['analysis_degraded']}`",
+        f"- Likely packed: `{packed_assessment['likely_packed']}`",
         "",
         "## Top Findings",
         "",
     ]
     lines.extend(
-        [f"- {finding}" for finding in analysis_summary["top_findings"]]
+        [f"- {finding}" for finding in findings["executive_summary"]["top_findings"]]
         or ["- No strong static findings identified."]
     )
+
+    lines.extend(
+        [
+            "",
+            "## Analyst-Ready Findings",
+            "",
+        ]
+    )
+    if findings["analyst_ready"]:
+        for finding in findings["analyst_ready"]:
+            evidence = ", ".join(finding.get("evidence", [])[:3]) or "none"
+            lines.append(
+                f"- `{finding['type']}` `{finding['name']}` confidence=`{finding['confidence']}` evidence=`{evidence}`"
+            )
+    else:
+        lines.append("- No analyst-ready high-confidence findings were identified.")
+
+    lines.extend(
+        [
+            "",
+            "## Contextual / Low-Confidence Findings",
+            "",
+        ]
+    )
+    if findings["contextual"]:
+        for finding in findings["contextual"]:
+            evidence = ", ".join(finding.get("evidence", [])[:3]) or "none"
+            notes = ", ".join(finding.get("notes", [])[:2]) or "none"
+            lines.append(
+                f"- `{finding['type']}` `{finding['name']}` evidence=`{evidence}` notes=`{notes}`"
+            )
+    else:
+        lines.append("- No contextual findings were recorded.")
+
+    lines.extend(
+        [
+            "",
+            "## Interpretation Notes",
+            "",
+        ]
+    )
+    if interpretation["notes"]:
+        for note in interpretation["notes"]:
+            evidence = ", ".join(note.get("evidence", [])[:3]) or "none"
+            lines.append(f"- `{note['code']}`: {note['summary']} Evidence: `{evidence}`")
+    else:
+        lines.append("- No benign-context guardrail notes were triggered.")
+
+    lines.extend(
+        [
+            "",
+            "## IOC Highlights",
+            "",
+            f"- High-confidence URLs: `{_format_artifact_entries(iocs['high_confidence']['urls'])}`",
+            f"- High-confidence domains: `{_format_artifact_entries(iocs['high_confidence']['domains'])}`",
+            f"- High-confidence registry paths: `{_format_artifact_entries(iocs['high_confidence']['registry_paths'])}`",
+            f"- High-confidence commands: `{_format_artifact_entries(iocs['high_confidence']['commands'])}`",
+            f"- Contextual URLs: `{_format_artifact_entries(iocs['contextual']['urls'])}`",
+            f"- Contextual file paths: `{_format_artifact_entries(iocs['contextual']['file_paths'])}`",
+            f"- Raw IOC count: `{iocs['raw_summary']['total']}`",
+            "",
+            "## YARA Status",
+            "",
+            f"- Scan status: `{yara['scan_status']}`",
+            f"- Attempted: `{yara['attempted']}`",
+            f"- Succeeded: `{yara['succeeded']}`",
+            f"- Match count: `{yara['match_count']}`",
+            f"- Rule stats: `discovered={yara['rule_stats']['discovered']} valid={yara['rule_stats']['valid']} invalid={yara['rule_stats']['invalid']}`",
+        ]
+    )
+    if yara["matches"]:
+        lines.append(
+            f"- Matches: `{', '.join(match['rule'] for match in yara['matches'][:5])}`"
+        )
+    else:
+        lines.append("- Matches: `none`")
+    if yara["warnings"]:
+        lines.append(f"- Warnings: `{'; '.join(yara['warnings'][:5])}`")
+    else:
+        lines.append("- Warnings: `none`")
+
     lines.extend(
         [
             "",
@@ -83,72 +154,19 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
             f"- Degraded mode: `{environment['degraded_mode']}`",
             f"- Reasons: `{', '.join(environment['degraded_reasons']) if environment['degraded_reasons'] else 'none'}`",
             "",
-            "## Likely Packed Assessment",
+            "## Raw Findings References",
             "",
-            f"- Attempted: `{packed_assessment['attempted']}`",
-            f"- Succeeded: `{packed_assessment['succeeded']}`",
-            f"- Likely packed: `{packed_assessment['likely_packed']}`",
-            f"- Threshold used: `{packed_assessment['threshold_used']}`",
-            f"- Rationale: `{packed_assessment['rationale']}`",
+            f"- Suspicious string count: `{strings['suspicious_count']}`",
+            f"- Interesting preview: `{', '.join(preview[:5]) if preview else 'none'}`",
+            f"- Raw artifacts: `{', '.join(findings['raw_references']['artifact_files'])}`",
             "",
         ]
     )
-
-    lines.extend(
-        [
-            "## Suspicious Strings Highlights",
-            "",
-            f"- Total suspicious strings: `{strings['suspicious_count']}`",
-        ]
-    )
-    lines.extend(suspicious_summary or ["- No suspicious string highlights identified."])
-    if preview:
-        lines.append(f"- Interesting preview: `{', '.join(preview[:5])}`")
-    lines.extend(
-        [
-            "",
-            "## Capability Highlights",
-            "",
-        ]
-    )
-    if matched_caps:
-        for name, confidence, evidence in matched_caps[:5]:
-            lines.append(
-                f"- `{name}` with `{confidence}` confidence"
-                + (f" from `{', '.join(evidence)}`" if evidence else "")
-            )
-    else:
-        lines.append("- No capabilities matched configured indicators.")
-    lines.extend(
-        [
-            "",
-            "## IOC Highlights",
-            "",
-            f"- URLs: `{', '.join(iocs['urls'][:3]) if iocs['urls'] else 'none'}`",
-            f"- Domains: `{', '.join(iocs['domains'][:3]) if iocs['domains'] else 'none'}`",
-            f"- Registry paths: `{', '.join(iocs['registry_paths'][:3]) if iocs['registry_paths'] else 'none'}`",
-            f"- Commands: `{', '.join(iocs['commands'][:3]) if iocs['commands'] else 'none'}`",
-            "",
-            "## YARA Highlights",
-            "",
-            f"- Attempted: `{yara['attempted']}`",
-            f"- Succeeded: `{yara['succeeded']}`",
-            f"- Skipped: `{yara['skipped']}`",
-            f"- Error: `{yara['error'] or 'none'}`",
-            f"- Match count: `{yara['match_count']}`",
-        ]
-    )
-    if yara["matches"]:
-        for match in yara["matches"][:5]:
-            lines.append(f"- `{match['rule']}` tags=`{', '.join(match['tags']) if match['tags'] else 'none'}`")
-    lines.append("")
 
     if report["errors"]:
-        lines.extend(["## Warnings and Errors", ""])
+        lines.extend(["## Warnings / Errors", ""])
         for error in report["errors"]:
-            lines.append(
-                f"- `{error['severity']}` during `{error['stage']}`: {error['message']}"
-            )
+            lines.append(f"- `{error['severity']}` during `{error['stage']}`: {error['message']}")
         lines.append("")
 
     return "\n".join(lines)

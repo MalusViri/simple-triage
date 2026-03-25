@@ -1,8 +1,178 @@
 {
   "interesting_strings_preview_limit": 8,
+  "analyst_highlight_limits": {
+    "default_per_type": 5,
+    "top_findings": 6,
+    "contextual_findings": 6
+  },
   "entropy": {
     "high_entropy_threshold": 7.2,
     "min_high_entropy_sections_for_likely_packed": 1
+  },
+  "artifact_filters": {
+    "trusted_pki_domains_or_patterns": [
+      "crl",
+      "ocsp",
+      "cacerts",
+      "certificates",
+      "digicert",
+      "globalsign",
+      "letsencrypt",
+      "lencr.org",
+      "sectigo",
+      "comodoca",
+      "entrust",
+      "microsoft.com/pki",
+      "microsoft.com/fwlink"
+    ],
+    "trusted_pki_keywords": [
+      "certificate",
+      "code signing",
+      "timestamp",
+      "timestamping",
+      "cert chain",
+      "x509"
+    ],
+    "build_artifact_patterns": [
+      "\\\\obj\\\\",
+      "\\\\bin\\\\",
+      "\\\\build\\\\",
+      "\\\\dist\\\\",
+      "\\\\release\\\\",
+      "\\\\debug\\\\",
+      ".pdb",
+      "visual studio",
+      "msvc",
+      "source map",
+      "sourcemap"
+    ],
+    "installer_artifact_patterns": [
+      "nullsoft",
+      "nsis",
+      "$pluginsdir",
+      "inno setup",
+      "wix",
+      "msiexec",
+      "installshield",
+      "squirrel",
+      "update.exe",
+      "uninstall",
+      "setup wizard",
+      "bootstrapper",
+      "electron",
+      "tauri",
+      "app.asar",
+      "nsisdl"
+    ],
+    "contextual_ip_values": [
+      "0.0.0.0",
+      "1.0.0.0",
+      "1.0.0.1",
+      "5.0.0.0",
+      "6.0.0.0",
+      "10.0.0.0"
+    ],
+    "command_high_confidence_terms": [
+      "-enc",
+      "frombase64string",
+      "downloadstring",
+      "downloadfile",
+      "invoke-expression",
+      "iwr ",
+      "invoke-webrequest",
+      "bitsadmin /transfer",
+      "certutil -urlcache",
+      "regsvr32 /s",
+      "mshta http"
+    ],
+    "command_contextual_terms": [
+      "msiexec",
+      "uninstall",
+      "setup",
+      "install",
+      "update.exe",
+      "squirrel",
+      "electron",
+      "tauri"
+    ],
+    "mutex_contextual_terms": [
+      "setup",
+      "update",
+      "nsis",
+      "installer",
+      "electron",
+      "tauri"
+    ]
+  },
+  "capabilities": {
+    "source_weights": {
+      "API": 3,
+      "string": 2,
+      "YARA": 4
+    },
+    "weak_indicators": [
+      "http://",
+      "https://",
+      "startup",
+      "debugger"
+    ],
+    "contextual_indicators": [
+      "run\\",
+      "sandbox",
+      "vmware",
+      "virtualbox",
+      "user-agent"
+    ],
+    "thresholds": {
+      "minimum_score_for_medium": 4,
+      "minimum_score_for_high": 7,
+      "minimum_sources_for_high": 2
+    },
+    "per_capability_overrides": {
+      "anti_analysis": {
+        "minimum_score_for_medium": 5,
+        "minimum_score_for_high": 7
+      },
+      "downloader_behavior": {
+        "minimum_score_for_medium": 5,
+        "minimum_score_for_high": 7
+      },
+      "networking": {
+        "minimum_score_for_medium": 5,
+        "minimum_score_for_high": 7
+      },
+      "persistence": {
+        "minimum_score_for_medium": 5,
+        "minimum_score_for_high": 7
+      }
+    }
+  },
+  "interpretation": {
+    "installer_or_packager_patterns": [
+      "nullsoft",
+      "nsis",
+      "$pluginsdir",
+      "inno setup",
+      "squirrel",
+      "electron",
+      "tauri",
+      "app.asar",
+      "update.exe",
+      "msiexec",
+      "installshield",
+      "bootstrapper"
+    ],
+    "certificate_or_signing_patterns": [
+      "certificate",
+      "code signing",
+      "timestamp",
+      "ocsp",
+      "crl"
+    ],
+    "minimum_installer_signals": 2
+  },
+  "yara_reporting": {
+    "warning_excerpt_limit": 5
   },
   "scoring": {
     "weights": {
@@ -15,6 +185,7 @@
       "suspicious_url": 6,
       "suspicious_registry_path": 5,
       "suspicious_command": 5,
+      "contextual_command": 2,
       "suspicious_powershell": 7,
       "degraded_mode_penalty": -10
     },
