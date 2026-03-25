@@ -90,12 +90,13 @@ def categorize_suspicious_strings(
     seen: dict[str, set[str]] = {name: set() for name in results}
     for match in matches:
         assigned = False
-        highlighted_value = match.get("match", match["value"])
         for category in pattern_to_categories.get(match["pattern"], []):
+            highlighted_value = match["value"] if category in {"powershell", "commands_or_lolbins"} else match.get("match", match["value"])
             if highlighted_value not in seen[category]:
                 results[category].append(highlighted_value)
                 seen[category].add(highlighted_value)
             assigned = True
+        highlighted_value = match.get("match", match["value"])
         if not assigned and highlighted_value not in seen["other"]:
             results["other"].append(highlighted_value)
             seen["other"].add(highlighted_value)

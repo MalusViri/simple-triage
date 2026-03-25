@@ -19,10 +19,13 @@ def _format_artifact_entries(entries: list[dict[str, Any]]) -> str:
 def build_summary_markdown(report: dict[str, Any]) -> str:
     """Build a curated analyst-facing markdown summary."""
     sample = report["sample"]
+    context = report["context"]
     analysis_summary = report["analysis_summary"]
     findings = report["findings"]
     interpretation = report["interpretation"]
     environment = report["environment"]
+    behavior_chains = report["behavior_chains"]
+    intent_inference = report["intent_inference"]
     packed_assessment = report["packed_assessment"]
     iocs = report["iocs"]
     preview = report["interesting_strings_preview"]
@@ -41,6 +44,16 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
         f"- Recommended next step: `{analysis_summary['recommended_next_step']}`",
         f"- Analysis degraded: `{findings['executive_summary']['analysis_degraded']}`",
         f"- Likely packed: `{packed_assessment['likely_packed']}`",
+        f"- Primary likely intent: `{intent_inference['primary']}`",
+        "",
+        "## Binary Context",
+        "",
+        f"- .NET indicators: `{context['is_dotnet']}`",
+        f"- Go indicators: `{context['is_go']}`",
+        f"- Installer-like: `{context['installer_like']}`",
+        f"- Sparse imports: `{context['has_sparse_imports']}`",
+        f"- High runtime noise: `{context['has_high_runtime_noise']}`",
+        f"- Context rationale: `{'; '.join(context['rationale']) if context['rationale'] else 'none'}`",
         "",
         "## Top Findings",
         "",
@@ -50,13 +63,32 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
         or ["- No strong static findings identified."]
     )
 
-    lines.extend(
-        [
-            "",
-            "## Analyst-Ready Findings",
-            "",
-        ]
-    )
+    lines.extend(["", "## Behavior Chains", ""])
+    matched_chains = [chain for chain in behavior_chains.values() if chain["matched"]]
+    if matched_chains:
+        for name, chain in sorted(behavior_chains.items()):
+            if not chain["matched"]:
+                continue
+            evidence = ", ".join(chain.get("evidence", [])[:3]) or "none"
+            sources = ", ".join(chain.get("evidence_sources", [])[:3]) or "none"
+            lines.append(
+                f"- `{name}` confidence=`{chain['confidence']}` evidence=`{evidence}` sources=`{sources}`"
+            )
+    else:
+        lines.append("- No composed behavior chains were identified.")
+
+    lines.extend(["", "## Likely Intent", ""])
+    if intent_inference["candidates"]:
+        for candidate in intent_inference["candidates"]:
+            evidence = ", ".join(candidate.get("evidence", [])[:3]) or "none"
+            rationale = ", ".join(candidate.get("rationale", [])[:2]) or "none"
+            lines.append(
+                f"- `{candidate['name']}` confidence=`{candidate['confidence']}` evidence=`{evidence}` rationale=`{rationale}`"
+            )
+    else:
+        lines.append("- No intent hypotheses were recorded.")
+
+    lines.extend(["", "## Analyst-Ready Findings", ""])
     if findings["analyst_ready"]:
         for finding in findings["analyst_ready"]:
             evidence = ", ".join(finding.get("evidence", [])[:3]) or "none"
@@ -66,13 +98,7 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
     else:
         lines.append("- No analyst-ready high-confidence findings were identified.")
 
-    lines.extend(
-        [
-            "",
-            "## Contextual / Low-Confidence Findings",
-            "",
-        ]
-    )
+    lines.extend(["", "## Contextual / Low-Confidence Findings", ""])
     if findings["contextual"]:
         for finding in findings["contextual"]:
             evidence = ", ".join(finding.get("evidence", [])[:3]) or "none"
@@ -83,19 +109,28 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
     else:
         lines.append("- No contextual findings were recorded.")
 
-    lines.extend(
-        [
-            "",
-            "## Interpretation Notes",
-            "",
-        ]
-    )
+    lines.extend(["", "## Interpretation Notes", ""])
     if interpretation["notes"]:
         for note in interpretation["notes"]:
             evidence = ", ".join(note.get("evidence", [])[:3]) or "none"
             lines.append(f"- `{note['code']}`: {note['summary']} Evidence: `{evidence}`")
     else:
         lines.append("- No benign-context guardrail notes were triggered.")
+
+    lines.extend(["", "## Grouped String Evidence", ""])
+    grouped_domains = strings["grouped_domains"]
+    matched_domains = [item for item in grouped_domains.values() if item["matched"]]
+    if matched_domains:
+        for name, domain in sorted(grouped_domains.items()):
+            if not domain["matched"]:
+                continue
+            evidence = ", ".join(domain["evidence"][:3]) or "none"
+            categories = ", ".join(domain["source_categories"]) or "none"
+            lines.append(
+                f"- `{name}` count=`{domain['count']}` categories=`{categories}` evidence=`{evidence}`"
+            )
+    else:
+        lines.append("- No grouped string domains were matched.")
 
     lines.extend(
         [

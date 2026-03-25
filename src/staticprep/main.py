@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from staticprep.analyzers.capabilities import infer_capabilities
+from staticprep.analyzers.contextual_analysis import (
+    detect_binary_context,
+    group_strings_by_behavior,
+    infer_behavior_chains,
+    infer_intents,
+)
 from staticprep.analyzers.hashes import compute_hashes
 from staticprep.analyzers.interpretation import build_interpretation
 from staticprep.analyzers.iocs import build_interesting_strings_preview, classify_iocs, extract_iocs
@@ -245,10 +251,35 @@ def analyze_sample(
         for name, result in capabilities.items()
     }
 
+    all_strings = [match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings
     packed_assessment = assess_packed_status(pe_info, analysis_settings)
+    context = detect_binary_context(
+        imports=imports,
+        pe_info=pe_info,
+        all_strings=all_strings,
+        packed_assessment=packed_assessment,
+        analysis_settings=analysis_settings,
+    )
     raw_iocs = extract_iocs(suspicious_strings, suspicious_categories)
-    ioc_views = classify_iocs(raw_iocs, analysis_settings)
+    ioc_views = classify_iocs(
+        raw_iocs,
+        analysis_settings,
+        context_strings=all_strings,
+        binary_context=context,
+    )
     iocs = {**raw_iocs, **ioc_views}
+    grouped_string_domains = group_strings_by_behavior(
+        all_strings=all_strings,
+        suspicious_categories=suspicious_categories,
+        analysis_settings=analysis_settings,
+    )
+    behavior_chains = infer_behavior_chains(
+        context=context,
+        capabilities=capabilities_dict,
+        grouped_strings=grouped_string_domains,
+        iocs=iocs,
+        analysis_settings=analysis_settings,
+    )
     interesting_strings_preview = build_interesting_strings_preview(
         suspicious_categories,
         iocs,
@@ -261,13 +292,23 @@ def analyze_sample(
         packed_assessment=packed_assessment,
         environment=environment,
         analysis_settings=analysis_settings,
+        context=context,
+        behavior_chains=behavior_chains,
     )
     interpretation = build_interpretation(
-        all_strings=[match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings,
+        all_strings=all_strings,
         iocs=iocs,
         packed_assessment=packed_assessment,
         capabilities=capabilities_dict,
         yara_results=yara_results,
+        analysis_settings=analysis_settings,
+    )
+    intent_inference = infer_intents(
+        context=context,
+        capabilities=capabilities_dict,
+        behavior_chains=behavior_chains,
+        grouped_strings=grouped_string_domains,
+        analysis_summary=analysis_summary,
         analysis_settings=analysis_settings,
     )
     findings = build_findings(
@@ -287,17 +328,21 @@ def analyze_sample(
     report = AnalysisReport(
         sample=metadata,
         environment=environment,
+        context=context,
         analysis_summary=analysis_summary,
         findings=findings,
         interpretation=interpretation,
         packed_assessment=packed_assessment,
         iocs=iocs,
+        behavior_chains=behavior_chains,
+        intent_inference=intent_inference,
         interesting_strings_preview=interesting_strings_preview,
         hashes=hashes,
         strings={
             "ascii_count": len(ascii_strings),
             "utf16_count": len(utf16_strings),
             "suspicious_count": len(suspicious_strings),
+            "grouped_domains": grouped_string_domains,
             "suspicious": {
                 "matches": suspicious_strings,
                 "categorized": suspicious_categories,

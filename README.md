@@ -31,11 +31,16 @@ The project is intentionally limited to static analysis preparation. It does not
 - Explicit per-step status reporting for PE, imports, section entropy, and YARA
 - Categorized suspicious string highlights for analyst review
 - Deterministic triage scoring and quick assessment summary
+- Context-aware scoring that adjusts for runtime/language and installer context
 - Packed/high-entropy assessment for PE sections
 - IOC-ready extraction and curated interesting-string preview
 - Artifact classification and IOC confidence filtering for analyst-facing highlights
+- Semantic IOC validation for version-like, local-only, and command-context artifacts
 - Separation between analyst-ready findings, contextual findings, and raw exports
 - Interpretation notes for likely installer/packager and certificate-infrastructure noise
+- Binary context detection for .NET, Go, sparse imports, installer-like packaging, and runtime noise
+- Grouped string evidence domains for behavior-oriented review
+- Deterministic behavior chaining and cautious intent inference
 - Cleaner YARA warning hygiene with partial-ruleset visibility
 
 ## Repository Layout
@@ -148,10 +153,13 @@ output/<sample_stem>_<short_sha256>/
 - `sample`
 - `environment`
 - `analysis_summary`
+- `context`
 - `findings`
 - `interpretation`
 - `packed_assessment`
 - `iocs`
+- `behavior_chains`
+- `intent_inference`
 - `interesting_strings_preview`
 - `hashes`
 - `strings`
@@ -245,6 +253,29 @@ Additive Phase 4 fields include:
   - `rule_stats`
   - `scan_status`
 
+Additive Phase 5 fields include:
+
+- `context`
+  - `is_dotnet`
+  - `is_go`
+  - `likely_packed`
+  - `installer_like`
+  - `has_sparse_imports`
+  - `has_high_runtime_noise`
+  - `evidence`
+  - `rationale`
+- `strings`
+  - `grouped_domains`
+- `behavior_chains`
+  - `download_write_execute_chain`
+  - `persistence_chain`
+  - `anti_analysis_chain`
+  - `credential_access_chain`
+  - `installer_or_packager_chain`
+- `intent_inference`
+  - `primary`
+  - `candidates`
+
 ## Capability Inference
 
 Capability inference is data-driven from `config/capability_map.json`. API names, string indicators, and YARA tags or rule names map to capability categories such as persistence, networking, process execution, and process injection.
@@ -274,6 +305,9 @@ This reduces overstatement for capabilities that are supported only by weak gene
 - matched capabilities and their confidence
 - YARA matches
 - suspicious string categories
+- grouped string behavior domains
+- composed behavior chains
+- binary runtime/language context
 - high-entropy sections
 - likely-packed assessment
 - degraded-mode awareness
@@ -290,7 +324,28 @@ Recommended next steps are intentionally simple:
 - `review_manually`
 - `investigate_deeper`
 
-Scoring weights and thresholds are stored locally in `config/analysis_settings.json`.
+Phase 5 adds context-aware adjustments while remaining rule-based:
+
+- Go binaries with runtime-heavy strings and high entropy are penalized so entropy alone does not overstate packer suspicion
+- .NET binaries with sparse imports plus packing or anti-analysis signals receive a bounded suspicion increase
+- installer-like context reduces severity unless stronger corroboration is present
+- high runtime-noise context reduces confidence in generic string-heavy results
+
+Scoring weights, thresholds, and context adjustments are stored locally in `config/analysis_settings.json`.
+
+## Binary Context Detection
+
+`context` is a new top-level report section that summarizes cautious runtime and packaging characteristics before prioritization and intent inference.
+
+Current deterministic heuristics include:
+
+- `.NET` indicators from `mscoree.dll`, `_CorExeMain`, `_CorDllMain`, and managed-runtime strings
+- `Go` indicators from Go build/runtime strings and Go-specific sections where present
+- installer-like context from NSIS, Nullsoft, Electron, Tauri, Squirrel, MSI, and related artifacts
+- sparse import detection for PE samples with unusually small import tables
+- high runtime-noise detection from framework or packager-heavy string evidence
+
+This section is contextual only. It does not produce malware or benign verdicts.
 
 ## Packed and High-Entropy Assessment
 
@@ -338,16 +393,75 @@ Examples of current filtering behavior:
 - manifest-like version values such as `1.0.0.0` are treated as contextual IP noise
 - build and installer artifacts are separated from stronger analyst highlights
 
+Phase 5 extends semantic validation for IP artifacts:
+
+- version-like values such as `1.1.1.1` are downgraded when they appear in .NET assembly or runtime-version context
+- `1.1.1.1` and similar values are downgraded when they appear in ping, sleep, timeout, or command-testing context
+- loopback and other local-only values such as `127.0.0.1` are retained but treated as contextual rather than promoted network IOCs
+
 `iocs.high_confidence` and `iocs.contextual` are curated subsets. `iocs.classified` and the original raw IOC lists remain available for transparency.
+
+## Grouped String Domains
+
+Phase 5 adds `strings.grouped_domains`, a deterministic grouped view of extracted string evidence. Raw strings and suspicious-string matches are preserved unchanged.
+
+Current grouped domains include:
+
+- `network`
+- `execution`
+- `filesystem`
+- `registry`
+- `anti_analysis`
+- `credentials_or_auth`
+- `crypto_or_encoding`
+- `installer_or_packager`
+- `runtime_or_language`
+
+These domains are driven by local categories and pattern lists in `config/analysis_settings.json`. They support later scoring, chaining, and intent inference while keeping the underlying evidence transparent.
+
+## Behavior Chains and Intent Inference
+
+Phase 5 adds composed behavior inference from multiple evidence families instead of relying only on isolated flags.
+
+Current behavior chains include:
+
+- `download_write_execute_chain`
+- `persistence_chain`
+- `anti_analysis_chain`
+- `credential_access_chain`
+- `installer_or_packager_chain`
+
+Each chain exports:
+
+- `matched`
+- `confidence`
+- `evidence`
+- `evidence_sources`
+
+Phase 5 also adds `intent_inference`, which provides cautious analyst hypotheses such as:
+
+- `likely_downloader`
+- `likely_packed_loader`
+- `likely_credential_aware_tooling`
+- `likely_installer_or_packaged_app`
+- `likely_managed_obfuscated_payload`
+- `likely_benign_packaged_utility`
+- `ambiguous_requires_manual_review`
+
+Multiple candidates may be present. These are not verdicts; they are explainable hypotheses derived from context, grouped strings, behavior chains, capabilities, and bounded triage scoring.
 
 ## Analyst-Ready vs Raw Findings
 
 `summary.md` now separates:
 
 - quick assessment
+- binary context
 - analyst-ready findings
+- behavior chains
+- likely intent
 - contextual / low-confidence findings
 - interpretation notes
+- grouped string evidence
 - IOC highlights
 - raw findings references
 
@@ -415,11 +529,17 @@ Key sections:
 - `artifact_filters.build_artifact_patterns`
 - `artifact_filters.installer_artifact_patterns`
 - `artifact_filters.contextual_ip_values`
+- `artifact_filters.semantic_ip_rules`
 - `artifact_filters.command_high_confidence_terms`
+- `context_detection`
+- `behavior_domains`
+- `behavior_chains`
 - `capabilities.source_weights`
 - `capabilities.weak_indicators`
 - `capabilities.per_capability_overrides`
 - `interpretation.installer_or_packager_patterns`
+- `intent_inference`
+- `scoring.context_adjustments`
 - `yara_reporting`
 
 These settings are intended to be tuned against a broader local sample set without introducing network access or nondeterministic behavior.
@@ -447,7 +567,9 @@ Pattern matching remains local and config-driven through `config/suspicious_patt
 - Degraded mode depends only on local runtime availability of `pefile` and `yara-python`; no attempt is made to fetch missing dependencies.
 - Capability confidence is heuristic and intended only as a quick triage aid, not a probabilistic score.
 - Analysis severity is heuristic and intended for triage prioritization, not malware verdicting.
+- Context detection, behavior chains, and intent inference are heuristic and intended for analyst prioritization, not verdicting.
 - Packed assessment is entropy-based and may flag compressed or otherwise unusual but benign binaries.
+- Go binaries and managed runtimes can still produce edge cases that require local tuning against broader sample sets.
 - Suspicious string categorization is regex-based and may produce overlaps or benign hits; analysts should treat it as prioritization support.
 - Non-PE files and malformed PEs are handled explicitly, but they will still produce empty import data because no import table could be parsed.
 

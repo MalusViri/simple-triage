@@ -72,6 +72,29 @@
       "6.0.0.0",
       "10.0.0.0"
     ],
+    "semantic_ip_rules": {
+      "local_only_ip_values": [
+        "127.0.0.1",
+        "169.254.169.254"
+      ],
+      "version_context_terms": [
+        "assemblyversion",
+        "assembly file version",
+        "assemblyversionattribute",
+        "productversion",
+        "fileversion",
+        "runtimeversion",
+        "targetframework"
+      ],
+      "ping_context_terms": [
+        "ping ",
+        "ping.exe",
+        "sleep ",
+        "timeout ",
+        "cmd /c ping",
+        "test-connection"
+      ]
+    },
     "command_high_confidence_terms": [
       "-enc",
       "frombase64string",
@@ -147,6 +170,198 @@
       }
     }
   },
+  "context_detection": {
+    "dotnet_import_indicators": [
+      "mscoree.dll"
+    ],
+    "dotnet_symbol_indicators": [
+      "_CorExeMain",
+      "_CorDllMain"
+    ],
+    "dotnet_string_patterns": [
+      "system.runtime",
+      "mscorlib",
+      "assemblyversion",
+      "targetframework",
+      "v4.0.30319",
+      "clr"
+    ],
+    "go_string_patterns": [
+      "go build id",
+      "golang",
+      "runtime.g",
+      "runtime.goexit",
+      "runtime.main",
+      "gopclntab"
+    ],
+    "go_section_patterns": [
+      ".gopclntab",
+      ".go.buildinfo"
+    ],
+    "installer_patterns": [
+      "nullsoft",
+      "nsis",
+      "$pluginsdir",
+      "inno setup",
+      "wix",
+      "msiexec",
+      "installshield",
+      "squirrel",
+      "update.exe",
+      "uninstall",
+      "setup wizard",
+      "bootstrapper",
+      "electron",
+      "tauri",
+      "app.asar",
+      "installer"
+    ],
+    "runtime_noise_patterns": [
+      "system.runtime",
+      "mscorlib",
+      "presentationframework",
+      "windows.forms",
+      "runtime.goexit",
+      "runtime.main",
+      "gopclntab",
+      "electron",
+      "app.asar",
+      "tauri"
+    ],
+    "minimum_installer_signals": 2,
+    "minimum_runtime_noise_signals": 2,
+    "sparse_import_thresholds": {
+      "max_dll_count": 3,
+      "max_api_count": 25
+    }
+  },
+  "behavior_domains": {
+    "anti_analysis": {
+      "categories": [],
+      "terms": [
+        "sandbox",
+        "vmware",
+        "virtualbox",
+        "wireshark",
+        "processhacker",
+        "debugger"
+      ]
+    },
+    "credentials_or_auth": {
+      "categories": [],
+      "terms": [
+        "password",
+        "credential",
+        "token",
+        "cookie",
+        "logon",
+        "lsass"
+      ]
+    },
+    "crypto_or_encoding": {
+      "categories": [],
+      "terms": [
+        "base64",
+        "aes",
+        "rsa",
+        "sha256",
+        "encrypt",
+        "decrypt"
+      ]
+    },
+    "execution": {
+      "categories": [
+        "commands_or_lolbins",
+        "powershell"
+      ],
+      "terms": [
+        "powershell",
+        "cmd.exe",
+        "rundll32",
+        "regsvr32",
+        "mshta",
+        "schtasks",
+        "createprocess"
+      ]
+    },
+    "filesystem": {
+      "categories": [
+        "file_paths",
+        "appdata_or_temp"
+      ],
+      "terms": [
+        "\\temp\\",
+        "\\appdata\\",
+        "programdata",
+        "startup",
+        ".exe"
+      ]
+    },
+    "installer_or_packager": {
+      "categories": [],
+      "terms": [
+        "nullsoft",
+        "nsis",
+        "installer",
+        "uninstall",
+        "msiexec",
+        "squirrel",
+        "electron",
+        "tauri",
+        "app.asar"
+      ]
+    },
+    "network": {
+      "categories": [
+        "urls",
+        "domains",
+        "ips"
+      ],
+      "terms": [
+        "http://",
+        "https://",
+        "socket",
+        "user-agent",
+        "download",
+        "connect"
+      ]
+    },
+    "registry": {
+      "categories": [
+        "registry_paths"
+      ],
+      "terms": [
+        "hkey_current_user",
+        "currentversion\\run",
+        "runonce",
+        "software\\microsoft\\windows"
+      ]
+    },
+    "runtime_or_language": {
+      "categories": [],
+      "terms": [
+        "system.runtime",
+        "mscorlib",
+        "assemblyversion",
+        "targetframework",
+        "go build id",
+        "runtime.goexit",
+        "gopclntab",
+        "electron",
+        "tauri"
+      ]
+    }
+  },
+  "behavior_chains": {
+    "download_write_execute_chain": {
+      "minimum_download_signals": 2,
+      "minimum_execution_signals": 1,
+      "minimum_filesystem_signals": 1
+    }
+  },
+  "intent_inference": {
+    "high_confidence_min_rationale_count": 3
+  },
   "interpretation": {
     "installer_or_packager_patterns": [
       "nullsoft",
@@ -179,6 +394,7 @@
       "high_confidence_capability": 20,
       "medium_confidence_capability": 12,
       "low_confidence_capability": 6,
+      "behavior_chain": 8,
       "yara_hit": 18,
       "high_entropy_section": 10,
       "likely_packed": 15,
@@ -188,6 +404,12 @@
       "contextual_command": 2,
       "suspicious_powershell": 7,
       "degraded_mode_penalty": -10
+    },
+    "context_adjustments": {
+      "go_high_entropy_penalty": -10,
+      "dotnet_sparse_obfuscated_bonus": 10,
+      "installer_like_penalty": -12,
+      "runtime_noise_penalty": -5
     },
     "severity_thresholds": {
       "high": 55,

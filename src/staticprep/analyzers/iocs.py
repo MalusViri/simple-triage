@@ -103,6 +103,16 @@ def _contains_any(value: str, patterns: list[str]) -> bool:
     return any(pattern.lower() in lowered for pattern in patterns)
 
 
+def _context_matches(value: str, context_strings: list[str], patterns: list[str]) -> bool:
+    """Return whether the IOC value appears near contextual language markers."""
+    lowered_value = value.lower()
+    for candidate in context_strings:
+        lowered_candidate = candidate.lower()
+        if lowered_value in lowered_candidate and _contains_any(lowered_candidate, patterns):
+            return True
+    return False
+
+
 def _classify_url(value: str, settings: dict[str, object]) -> tuple[str, list[str]]:
     parsed, parse_errors = _safe_parse_url(value)
     if parsed is None:
@@ -150,14 +160,29 @@ def _classify_domain(value: str, settings: dict[str, object]) -> tuple[str, list
     return "high_confidence", ["valid_domain_indicator"]
 
 
-def _classify_ip(value: str, settings: dict[str, object]) -> tuple[str, list[str]]:
+def _classify_ip(
+    value: str,
+    settings: dict[str, object],
+    context_strings: list[str],
+    binary_context: dict[str, object] | None,
+) -> tuple[str, list[str]]:
     try:
         parsed = ipaddress.ip_address(value)
     except ValueError:
         return "malformed", ["invalid_ipv4_address"]
 
+    semantic = settings.get("semantic_ip_rules", {})
+
     if value in settings["contextual_ip_values"]:
         return "contextual_only", ["manifest_or_version_like_value"]
+    if value in semantic.get("local_only_ip_values", []):
+        return "contextual_only", ["local_only_address"]
+    if _context_matches(value, context_strings, semantic.get("version_context_terms", [])) and (
+        binary_context or {}
+    ).get("is_dotnet", False):
+        return "contextual_only", ["version_like_runtime_value"]
+    if _context_matches(value, context_strings, semantic.get("ping_context_terms", [])):
+        return "low_confidence", ["command_or_connectivity_test_context"]
     if parsed.is_loopback or parsed.is_multicast or parsed.is_unspecified:
         return "contextual_only", ["non_routable_special_address"]
     if parsed.is_private:
@@ -217,13 +242,15 @@ def _classify_artifact(
     artifact_type: str,
     value: str,
     settings: dict[str, object],
+    context_strings: list[str],
+    binary_context: dict[str, object] | None,
 ) -> tuple[str, list[str]]:
     if artifact_type == "urls":
         return _classify_url(value, settings)
     if artifact_type == "domains":
         return _classify_domain(value, settings)
     if artifact_type == "ips":
-        return _classify_ip(value, settings)
+        return _classify_ip(value, settings, context_strings, binary_context)
     if artifact_type == "registry_paths":
         return _classify_registry_path(value, settings)
     if artifact_type == "file_paths":
@@ -238,10 +265,13 @@ def _classify_artifact(
 def classify_iocs(
     raw_iocs: dict[str, list[str]],
     analysis_settings: dict[str, object],
+    context_strings: list[str] | None = None,
+    binary_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Classify raw IOC values into analyst-facing confidence buckets."""
     settings = analysis_settings["artifact_filters"]
     per_type_limit = analysis_settings["analyst_highlight_limits"]["default_per_type"]
+    context_strings = context_strings or []
 
     classified: dict[str, list[dict[str, object]]] = {artifact_type: [] for artifact_type in IOC_TYPES}
     high_confidence: dict[str, list[dict[str, object]]] = {artifact_type: [] for artifact_type in IOC_TYPES}
@@ -262,7 +292,13 @@ def classify_iocs(
 
     for artifact_type in IOC_TYPES:
         for value in raw_iocs.get(artifact_type, []):
-            classification, reasons = _classify_artifact(artifact_type, value, settings)
+            classification, reasons = _classify_artifact(
+                artifact_type,
+                value,
+                settings,
+                context_strings,
+                binary_context,
+            )
             entry = {
                 "value": value,
                 "classification": classification,

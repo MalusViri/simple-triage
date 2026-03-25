@@ -18,10 +18,16 @@ def test_analyze_sample_handles_non_pe_file(tmp_path, fixture_dir):
     )
 
     assert report.pe["is_pe"] is False
-    assert report.pe["attempted"] is True
-    assert report.pe["succeeded"] is False
-    assert report.imports["attempted"] is True
-    assert report.imports["succeeded"] is False
+    if pefile is None:
+        assert report.pe["attempted"] is False
+        assert report.pe["skipped"] is True
+        assert report.imports["attempted"] is False
+        assert report.imports["skipped"] is True
+    else:
+        assert report.pe["attempted"] is True
+        assert report.pe["succeeded"] is False
+        assert report.imports["attempted"] is True
+        assert report.imports["succeeded"] is False
     assert report.imports["error"] is not None
     assert any(error.stage == "pe" for error in report.errors)
     assert (output_dir / "report.json").exists()

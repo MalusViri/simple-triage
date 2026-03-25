@@ -76,10 +76,15 @@ def build_analysis_summary(
     packed_assessment: dict[str, Any],
     environment: dict[str, Any],
     analysis_settings: dict[str, Any],
+    context: dict[str, Any] | None = None,
+    behavior_chains: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic top-level triage summary."""
     weights = analysis_settings["scoring"]["weights"]
     thresholds = analysis_settings["scoring"]["severity_thresholds"]
+    adjustments = analysis_settings["scoring"].get("context_adjustments", {})
+    context = context or {}
+    behavior_chains = behavior_chains or {}
 
     score = 0
     reasons: list[str] = []
@@ -148,6 +153,38 @@ def build_analysis_summary(
         score += len(contextual_iocs["commands"]) * weights["contextual_command"]
         reasons.append(f"{len(contextual_iocs['commands'])} low-confidence command indicator(s)")
         top_findings.append("Command-like strings were identified but some are contextual only")
+
+    for chain_name, chain in sorted(behavior_chains.items()):
+        if chain.get("matched"):
+            score += weights["behavior_chain"]
+            reasons.append(f"Behavior chain matched: {chain_name}")
+            top_findings.append(
+                chain_name.replace("_", " ")
+            )
+
+    if context.get("is_go") and packed_assessment.get("likely_packed"):
+        score += adjustments["go_high_entropy_penalty"]
+        reasons.append("Go runtime context reduced confidence in entropy-only packing suspicion")
+
+    if (
+        context.get("is_dotnet")
+        and context.get("has_sparse_imports")
+        and (
+            packed_assessment.get("likely_packed")
+            or capabilities.get("anti_analysis", {}).get("matched")
+        )
+    ):
+        score += adjustments["dotnet_sparse_obfuscated_bonus"]
+        reasons.append(".NET plus sparse imports and obfuscation indicators increased suspicion")
+        top_findings.append(".NET sparse-import profile with obfuscation indicators")
+
+    if context.get("installer_like"):
+        score += adjustments["installer_like_penalty"]
+        reasons.append("Installer-like context reduced severity absent stronger corroboration")
+
+    if context.get("has_high_runtime_noise"):
+        score += adjustments["runtime_noise_penalty"]
+        reasons.append("High runtime-noise context reduced confidence in generic string hits")
 
     if environment.get("degraded_mode"):
         score += weights["degraded_mode_penalty"]

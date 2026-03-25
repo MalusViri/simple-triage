@@ -37,15 +37,18 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
     assert output_dir.name.startswith("note_")
     assert sorted(report_json.keys()) == [
         "analysis_summary",
+        "behavior_chains",
         "capabilities",
+        "context",
         "environment",
         "errors",
         "findings",
         "generated_at",
         "hashes",
+        "imports",
+        "intent_inference",
         "interesting_strings_preview",
         "interpretation",
-        "imports",
         "iocs",
         "packed_assessment",
         "pe",
@@ -71,6 +74,7 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "registry_paths",
         "urls",
     ]
+    assert "grouped_domains" in report_json["strings"]
     assert sorted(report_json["iocs"].keys()) == [
         "classified",
         "commands",
@@ -84,9 +88,19 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "registry_paths",
         "urls",
     ]
+    assert sorted(report_json["context"].keys()) == [
+        "evidence",
+        "has_high_runtime_noise",
+        "has_sparse_imports",
+        "installer_like",
+        "is_dotnet",
+        "is_go",
+        "likely_packed",
+        "rationale",
+    ]
     assert sorted(report_json["analysis_summary"].keys()) == [
-        "recommended_next_step",
         "reasons",
+        "recommended_next_step",
         "score",
         "severity",
         "top_findings",
@@ -99,10 +113,14 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
     ]
     assert sorted(report_json["interpretation"].keys()) == ["codes", "notes", "summary"]
     assert "## Quick Assessment" in summary
+    assert "## Binary Context" in summary
     assert "## Top Findings" in summary
+    assert "## Behavior Chains" in summary
+    assert "## Likely Intent" in summary
     assert "## Analyst-Ready Findings" in summary
     assert "## Contextual / Low-Confidence Findings" in summary
     assert "## Interpretation Notes" in summary
+    assert "## Grouped String Evidence" in summary
     assert "## Raw Findings References" in summary
     assert "## Environment and Degraded Mode" in summary
     assert "## IOC Highlights" in summary
