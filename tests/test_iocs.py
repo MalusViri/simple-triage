@@ -78,6 +78,72 @@ def test_config_driven_ioc_filtering_can_reclassify_entries():
     assert result["classified"]["domains"][0]["classification"] == "trusted_pki"
 
 
+def test_classify_iocs_marks_malformed_url_candidates_without_crashing():
+    settings = load_analysis_settings()
+    raw_iocs = {
+        "urls": ["http://[::1", "https://example.com/path"],
+        "ips": [],
+        "domains": [],
+        "registry_paths": [],
+        "file_paths": [],
+        "mutexes": [],
+        "commands": [],
+    }
+
+    result = classify_iocs(raw_iocs, settings)
+
+    assert result["classified"]["urls"] == [
+        {
+            "value": "http://[::1",
+            "classification": "malformed",
+            "reasons": ["invalid_url_structure"],
+            "artifact_type": "urls",
+        },
+        {
+            "value": "https://example.com/path",
+            "classification": "high_confidence",
+            "reasons": ["valid_network_indicator"],
+            "artifact_type": "urls",
+        },
+    ]
+    assert result["high_confidence"]["urls"] == [
+        {
+            "value": "https://example.com/path",
+            "classification": "high_confidence",
+            "reasons": ["valid_network_indicator"],
+            "artifact_type": "urls",
+        }
+    ]
+    assert result["contextual"]["urls"] == []
+    assert result["raw_summary"]["by_classification"]["malformed"] == 1
+
+
+def test_classify_iocs_marks_invalid_ipv6_style_url_host_as_malformed():
+    settings = load_analysis_settings()
+    raw_iocs = {
+        "urls": ["http://[fe80::1"],
+        "ips": [],
+        "domains": [],
+        "registry_paths": [],
+        "file_paths": [],
+        "mutexes": [],
+        "commands": [],
+    }
+
+    result = classify_iocs(raw_iocs, settings)
+
+    assert result["classified"]["urls"] == [
+        {
+            "value": "http://[fe80::1",
+            "classification": "malformed",
+            "reasons": ["invalid_url_structure"],
+            "artifact_type": "urls",
+        }
+    ]
+    assert result["high_confidence"]["urls"] == []
+    assert result["contextual"]["urls"] == []
+
+
 def test_interesting_strings_preview_prefers_high_value_categories():
     categorized = {
         "urls": ["http://example.com"],

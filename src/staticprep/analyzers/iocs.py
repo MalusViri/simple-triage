@@ -90,11 +90,12 @@ def extract_iocs(
         "mutexes": mutexes,
         "commands": commands,
     }
-
-
-def _host_from_url(value: str) -> str:
-    parsed = urlparse(value)
-    return (parsed.hostname or "").lower()
+def _safe_parse_url(value: str) -> tuple[object | None, list[str]]:
+    """Parse URL candidates without allowing malformed authorities to abort analysis."""
+    try:
+        return urlparse(value), []
+    except ValueError:
+        return None, ["invalid_url_structure"]
 
 
 def _contains_any(value: str, patterns: list[str]) -> bool:
@@ -103,8 +104,15 @@ def _contains_any(value: str, patterns: list[str]) -> bool:
 
 
 def _classify_url(value: str, settings: dict[str, object]) -> tuple[str, list[str]]:
-    host = _host_from_url(value)
-    parsed = urlparse(value)
+    parsed, parse_errors = _safe_parse_url(value)
+    if parsed is None:
+        return "malformed", parse_errors
+
+    try:
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return "malformed", ["invalid_url_structure"]
+
     combined = f"{host}{parsed.path}".lower()
     reasons: list[str] = []
 
