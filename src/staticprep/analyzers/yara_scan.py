@@ -12,6 +12,23 @@ except ImportError:  # pragma: no cover - dependency may be absent in some envir
     yara = None
 
 
+def _derive_yara_health(
+    succeeded: bool,
+    enabled: bool,
+    warning_count: int,
+    rule_stats: dict[str, int],
+    scan_status: str,
+) -> str:
+    """Return a concise analyst-facing YARA health summary."""
+    if not enabled or scan_status in {"skipped_dependency_unavailable", "skipped_by_flag"}:
+        return "unavailable"
+    if succeeded and warning_count == 0:
+        return "healthy"
+    if succeeded and rule_stats.get("valid", 0) > 0 and rule_stats.get("invalid", 0) > 0:
+        return "healthy_with_minor_rule_errors"
+    return "degraded"
+
+
 def _build_yara_externals(path: Path) -> dict[str, str]:
     """Return standard YARA external variables for a sample."""
     return {
@@ -53,6 +70,7 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
                 "invalid": 0,
             },
             "scan_status": "skipped_dependency_unavailable",
+            "yara_health": "unavailable",
         }, [
             {
                 "stage": "yara",
@@ -79,6 +97,7 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
                 "invalid": 0,
             },
             "scan_status": "failed_missing_rules_directory",
+            "yara_health": "degraded",
         }, [
             {
                 "stage": "yara",
@@ -106,6 +125,7 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
                 "invalid": 0,
             },
             "scan_status": "failed_no_rules_found",
+            "yara_health": "degraded",
         }, [
             {
                 "stage": "yara",
@@ -149,6 +169,7 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
                 "invalid": len(errors),
             },
             "scan_status": "failed_all_rules_invalid",
+            "yara_health": "degraded",
         }, errors
 
     rules = yara.compile(filepaths=compiled_namespaces, externals=externals)
@@ -162,6 +183,12 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
             }
         )
     matches.sort(key=lambda item: item["rule"])
+    scan_status = "completed_with_partial_rule_issues" if errors else "completed"
+    rule_stats = {
+        "discovered": len(rule_files),
+        "valid": len(compiled_namespaces),
+        "invalid": len(errors),
+    }
     return {
         "attempted": True,
         "succeeded": True,
@@ -173,10 +200,13 @@ def run_yara_scan(path: Path, rules_dir: Path) -> tuple[dict[str, Any], list[dic
         "matches": matches,
         "warning_count": len(errors),
         "warnings": [error["message"] for error in errors],
-        "rule_stats": {
-            "discovered": len(rule_files),
-            "valid": len(compiled_namespaces),
-            "invalid": len(errors),
-        },
-        "scan_status": "completed_with_partial_rule_issues" if errors else "completed",
+        "rule_stats": rule_stats,
+        "scan_status": scan_status,
+        "yara_health": _derive_yara_health(
+            succeeded=True,
+            enabled=True,
+            warning_count=len(errors),
+            rule_stats=rule_stats,
+            scan_status=scan_status,
+        ),
     }, errors

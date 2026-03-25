@@ -91,9 +91,11 @@ def test_build_analysis_summary_uses_curated_ioc_views():
     )
 
     assert result["severity"] == "high"
-    assert result["score"] == 91
+    assert result["score"] == 85
     assert result["recommended_next_step"] == "investigate_deeper"
-    assert "1 high-confidence URL indicator(s)" in result["reasons"]
+    assert "1 validated external URL/domain indicator(s)" in result["reasons"]
+    assert "score_breakdown" in result
+    assert "dominant_signal_classes" in result
 
 
 def test_build_analysis_summary_accounts_for_degraded_mode():
@@ -136,6 +138,15 @@ def test_build_interpretation_adds_packager_guardrails():
     interpretation = build_interpretation(
         all_strings=["Nullsoft Installer", "Electron", "OCSP", "CRL", "app.asar"],
         iocs={
+            "suppressed": {
+                "urls": [],
+                "ips": [],
+                "domains": [],
+                "registry_paths": [],
+                "file_paths": [],
+                "mutexes": [],
+                "commands": [],
+            },
             "raw_summary": {
                 "by_classification": {
                     "trusted_pki": 2,
@@ -143,6 +154,14 @@ def test_build_interpretation_adds_packager_guardrails():
                 }
             }
         },
+        context={
+            "installer_like": True,
+            "is_go": False,
+            "is_dotnet": False,
+        },
+        behavior_chains={"download_write_execute_chain": {"matched": False}},
+        intent_inference={"primary": "likely_installer_or_packaged_app"},
+        analysis_summary={"top_findings": ["Likely packed"], "suppressed_signal_classes": []},
         packed_assessment={"likely_packed": True, "high_entropy_sections": [{"name": ".ndata"}]},
         capabilities={"networking": {"matched": False, "confidence": "low"}},
         yara_results={"match_count": 0},
@@ -153,6 +172,7 @@ def test_build_interpretation_adds_packager_guardrails():
     assert "possible_electron_nsis_tauri_characteristics" in interpretation["codes"]
     assert "certificate_or_signing_infrastructure_present" in interpretation["codes"]
     assert "suspiciousness_may_reflect_compression_or_installer_behavior" in interpretation["codes"]
+    assert interpretation["analyst_summary"]
 
 
 def test_build_findings_separates_analyst_ready_and_contextual_views():

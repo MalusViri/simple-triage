@@ -85,7 +85,9 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "ips",
         "mutexes",
         "raw_summary",
+        "reasoning_categories",
         "registry_paths",
+        "suppressed",
         "urls",
     ]
     assert sorted(report_json["context"].keys()) == [
@@ -99,10 +101,13 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "rationale",
     ]
     assert sorted(report_json["analysis_summary"].keys()) == [
+        "dominant_signal_classes",
         "reasons",
         "recommended_next_step",
         "score",
+        "score_breakdown",
         "severity",
+        "suppressed_signal_classes",
         "top_findings",
     ]
     assert sorted(report_json["findings"].keys()) == [
@@ -111,12 +116,21 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "executive_summary",
         "raw_references",
     ]
-    assert sorted(report_json["interpretation"].keys()) == ["codes", "notes", "summary"]
+    assert sorted(report_json["interpretation"].keys()) == [
+        "analyst_summary",
+        "codes",
+        "notes",
+        "quick_assessment",
+        "strongest_evidence",
+        "summary",
+        "suppressed_or_contextual_evidence",
+    ]
     assert "## Quick Assessment" in summary
     assert "## Binary Context" in summary
     assert "## Top Findings" in summary
     assert "## Behavior Chains" in summary
     assert "## Likely Intent" in summary
+    assert "## Signal Scoring" in summary
     assert "## Analyst-Ready Findings" in summary
     assert "## Contextual / Low-Confidence Findings" in summary
     assert "## Interpretation Notes" in summary
@@ -129,6 +143,7 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
     assert isinstance(report_json["interesting_strings_preview"], list)
     assert "raw_summary" in report_json["iocs"]
     assert "warning_count" in report_json["yara"]
+    assert "yara_health" in report_json["yara"]
 
 
 def test_degraded_mode_reporting_when_dependencies_missing(tmp_path, fixture_dir, monkeypatch):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import ipaddress
 from urllib.parse import urlparse
 
+from staticprep.analyzers.evidence import assess_evidence_quality
+
 
 IOC_TYPES = (
     "urls",
@@ -276,6 +278,7 @@ def classify_iocs(
     classified: dict[str, list[dict[str, object]]] = {artifact_type: [] for artifact_type in IOC_TYPES}
     high_confidence: dict[str, list[dict[str, object]]] = {artifact_type: [] for artifact_type in IOC_TYPES}
     contextual: dict[str, list[dict[str, object]]] = {artifact_type: [] for artifact_type in IOC_TYPES}
+    suppressed: dict[str, list[dict[str, object]]] = {artifact_type: [] for artifact_type in IOC_TYPES}
     raw_summary = {
         "total": 0,
         "by_type": {artifact_type: 0 for artifact_type in IOC_TYPES},
@@ -286,6 +289,12 @@ def classify_iocs(
             "trusted_pki": 0,
             "likely_build_artifact": 0,
             "likely_installer_artifact": 0,
+            "contextual_only": 0,
+        },
+        "by_quality": {
+            "clean": 0,
+            "noisy": 0,
+            "malformed": 0,
             "contextual_only": 0,
         },
     }
@@ -299,17 +308,33 @@ def classify_iocs(
                 context_strings,
                 binary_context,
             )
+            quality_type = (
+                "file_path"
+                if artifact_type == "file_paths"
+                else "command"
+                if artifact_type == "commands"
+                else "mutex"
+                if artifact_type == "mutexes"
+                else "suspicious_string"
+            )
+            quality = assess_evidence_quality(value, quality_type, analysis_settings)
             entry = {
                 "value": value,
                 "classification": classification,
                 "reasons": reasons,
                 "artifact_type": artifact_type,
+                "quality": quality["quality"],
+                "allowed_for_reasoning": quality["allowed_for_reasoning"],
+                "quality_reasons": quality["quality_reasons"],
             }
             classified[artifact_type].append(entry)
             raw_summary["total"] += 1
             raw_summary["by_type"][artifact_type] += 1
             raw_summary["by_classification"][classification] += 1
-            if classification == "high_confidence":
+            raw_summary["by_quality"][quality["quality"]] += 1
+            if not quality["allowed_for_reasoning"]:
+                suppressed[artifact_type].append(entry)
+            if classification == "high_confidence" and quality["allowed_for_reasoning"]:
                 high_confidence[artifact_type].append(entry)
             elif classification in CONTEXTUAL_CLASSES:
                 contextual[artifact_type].append(entry)
@@ -324,11 +349,16 @@ def classify_iocs(
             contextual[artifact_type],
             key=lambda item: item["value"],
         )[:per_type_limit]
+        suppressed[artifact_type] = sorted(
+            suppressed[artifact_type],
+            key=lambda item: item["value"],
+        )[:per_type_limit]
 
     return {
         "classified": classified,
         "high_confidence": high_confidence,
         "contextual": contextual,
+        "suppressed": suppressed,
         "raw_summary": raw_summary,
     }
 
@@ -341,15 +371,16 @@ def build_interesting_strings_preview(
     """Return a short deterministic preview that favors analyst-ready strings."""
     high_confidence = iocs.get("high_confidence", {})
     contextual = iocs.get("contextual", {})
+    reasoning_categories = iocs.get("reasoning_categories", categorized_strings)
     ordered_groups = [
         [entry["value"] for entry in high_confidence.get("urls", [])],
         [entry["value"] for entry in high_confidence.get("commands", [])],
-        categorized_strings.get("powershell", []),
+        reasoning_categories.get("powershell", []),
         [entry["value"] for entry in high_confidence.get("registry_paths", [])],
         [entry["value"] for entry in high_confidence.get("domains", [])],
         [entry["value"] for entry in contextual.get("commands", [])],
-        categorized_strings.get("commands_or_lolbins", []),
-        categorized_strings.get("file_paths", []),
+        reasoning_categories.get("commands_or_lolbins", []),
+        reasoning_categories.get("file_paths", []),
     ]
 
     preview: list[str] = []

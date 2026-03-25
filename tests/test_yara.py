@@ -19,12 +19,14 @@ def test_yara_missing_directory_returns_warning(tmp_path):
         assert result["succeeded"] is False
         assert result["error"] == "yara-python is not installed"
         assert result["scan_status"] == "skipped_dependency_unavailable"
+        assert result["yara_health"] == "unavailable"
         assert errors[0]["severity"] == "warning"
     else:
         assert result["enabled"] is True
         assert result["attempted"] is True
         assert result["succeeded"] is False
         assert result["scan_status"] == "failed_missing_rules_directory"
+        assert result["yara_health"] == "degraded"
         assert errors[0]["message"].startswith("Rules directory does not exist")
 
 
@@ -52,6 +54,7 @@ def test_yara_rule_loading_and_match_parsing(fixture_dir):
     assert result["enabled"] is True
     assert result["succeeded"] is True
     assert result["scan_status"] == "completed"
+    assert result["yara_health"] == "healthy"
     assert result["match_count"] == 1
     assert result["matches"] == [
         {
@@ -139,6 +142,7 @@ rule BadRule
 
     assert result["succeeded"] is True
     assert result["scan_status"] == "completed_with_partial_rule_issues"
+    assert result["yara_health"] == "healthy_with_minor_rule_errors"
     assert result["warning_count"] == 1
     assert result["rule_stats"] == {"discovered": 2, "valid": 1, "invalid": 1}
     assert result["matches"][0]["rule"] == "GoodRule"

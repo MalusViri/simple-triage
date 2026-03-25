@@ -92,26 +92,21 @@ def test_classify_iocs_marks_malformed_url_candidates_without_crashing():
 
     result = classify_iocs(raw_iocs, settings)
 
-    assert result["classified"]["urls"] == [
-        {
-            "value": "http://[::1",
-            "classification": "malformed",
-            "reasons": ["invalid_url_structure"],
-            "artifact_type": "urls",
-        },
-        {
-            "value": "https://example.com/path",
-            "classification": "high_confidence",
-            "reasons": ["valid_network_indicator"],
-            "artifact_type": "urls",
-        },
-    ]
+    assert result["classified"]["urls"][0]["value"] == "http://[::1"
+    assert result["classified"]["urls"][0]["classification"] == "malformed"
+    assert result["classified"]["urls"][0]["reasons"] == ["invalid_url_structure"]
+    assert result["classified"]["urls"][1]["value"] == "https://example.com/path"
+    assert result["classified"]["urls"][1]["classification"] == "high_confidence"
+    assert result["classified"]["urls"][1]["allowed_for_reasoning"] is True
     assert result["high_confidence"]["urls"] == [
         {
             "value": "https://example.com/path",
             "classification": "high_confidence",
             "reasons": ["valid_network_indicator"],
             "artifact_type": "urls",
+            "quality": "clean",
+            "allowed_for_reasoning": True,
+            "quality_reasons": ["reasoning_eligible"],
         }
     ]
     assert result["contextual"]["urls"] == []
@@ -132,14 +127,8 @@ def test_classify_iocs_marks_invalid_ipv6_style_url_host_as_malformed():
 
     result = classify_iocs(raw_iocs, settings)
 
-    assert result["classified"]["urls"] == [
-        {
-            "value": "http://[fe80::1",
-            "classification": "malformed",
-            "reasons": ["invalid_url_structure"],
-            "artifact_type": "urls",
-        }
-    ]
+    assert result["classified"]["urls"][0]["value"] == "http://[fe80::1"
+    assert result["classified"]["urls"][0]["classification"] == "malformed"
     assert result["high_confidence"]["urls"] == []
     assert result["contextual"]["urls"] == []
 

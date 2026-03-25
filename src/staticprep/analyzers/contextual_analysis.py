@@ -23,6 +23,11 @@ def _append_unique(bucket: list[str], seen: set[str], value: str) -> None:
         seen.add(value)
 
 
+def _allowed_entries(entries: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return entries that are eligible for higher-level reasoning."""
+    return [entry for entry in (entries or []) if entry.get("allowed_for_reasoning", True)]
+
+
 def detect_binary_context(
     imports: dict[str, Any],
     pe_info: dict[str, Any],
@@ -172,6 +177,9 @@ def infer_behavior_chains(
     settings = analysis_settings["behavior_chains"]
     high_iocs = iocs.get("high_confidence", {})
     contextual_iocs = iocs.get("contextual", {})
+    allowed_contextual_paths = _allowed_entries(contextual_iocs.get("file_paths"))
+    allowed_commands = _allowed_entries(high_iocs.get("commands"))
+    allowed_urls = _allowed_entries(high_iocs.get("urls"))
 
     def capability_matched(name: str) -> bool:
         return bool(capabilities.get(name, {}).get("matched"))
@@ -185,7 +193,7 @@ def infer_behavior_chains(
         [
             capability_matched("downloader_behavior"),
             capability_matched("networking"),
-            bool(high_iocs.get("urls")),
+            bool(allowed_urls),
             group_matched("network"),
         ]
     )
@@ -193,13 +201,13 @@ def infer_behavior_chains(
         [
             capability_matched("process_execution"),
             group_matched("execution"),
-            bool(high_iocs.get("commands")),
+            bool(allowed_commands),
         ]
     )
     filesystem_signal_count = sum(
         [
             group_matched("filesystem"),
-            bool(high_iocs.get("file_paths") or contextual_iocs.get("file_paths")),
+            bool(_allowed_entries(high_iocs.get("file_paths")) or allowed_contextual_paths),
         ]
     )
     download_write_execute = (
@@ -224,7 +232,7 @@ def infer_behavior_chains(
             for source, matched in {
                 "capabilities": capability_matched("downloader_behavior") or capability_matched("networking") or capability_matched("process_execution"),
                 "grouped_strings": group_matched("network") or group_matched("execution") or group_matched("filesystem"),
-                "iocs": bool(high_iocs.get("urls") or high_iocs.get("commands") or contextual_iocs.get("file_paths")),
+                "iocs": bool(allowed_urls or allowed_commands or allowed_contextual_paths),
             }.items()
             if matched
         ),
@@ -329,59 +337,133 @@ def infer_intents(
     capabilities: dict[str, dict[str, Any]],
     behavior_chains: dict[str, dict[str, Any]],
     grouped_strings: dict[str, dict[str, Any]],
+    iocs: dict[str, Any],
     analysis_summary: dict[str, Any],
     analysis_settings: dict[str, Any],
 ) -> dict[str, Any]:
     """Build explainable analyst hypotheses from context and composed behaviors."""
     settings = analysis_settings["intent_inference"]
     candidates: list[dict[str, Any]] = []
+    candidate_weights = settings["candidate_weights"]
+    suppressions = settings["context_suppression"]
+    high_iocs = iocs.get("high_confidence", {})
+    classified = iocs.get("classified", {})
 
-    def add_candidate(name: str, matched: bool, rationale: list[str], evidence: list[str]) -> None:
-        if not matched:
+    def high_conf_count(name: str) -> int:
+        return len(_allowed_entries(high_iocs.get(name)))
+
+    def weak_count(name: str) -> int:
+        return len(
+            [
+                entry
+                for entry in classified.get(name, [])
+                if entry.get("classification") == "low_confidence"
+                and entry.get("allowed_for_reasoning", False)
+            ]
+        )
+
+    strong_malicious_chain_present = any(
+        behavior_chains.get(name, {}).get("matched")
+        for name in (
+            "download_write_execute_chain",
+            "credential_access_chain",
+            "persistence_chain",
+        )
+    )
+
+    def add_candidate(
+        name: str,
+        score: int,
+        rationale: list[str],
+        evidence: list[str],
+        suppressed_reasons: list[str] | None = None,
+    ) -> None:
+        if score <= 0:
             return
+        confidence = "high" if score >= settings["minimum_primary_score"] + 4 else "medium"
+        unique_rationale = [item for item in rationale if item]
+        unique_evidence = sorted(set(item for item in evidence if item))[:6]
         candidates.append(
             {
                 "name": name,
                 "matched": True,
-                "confidence": "high" if len(rationale) >= settings["high_confidence_min_rationale_count"] else "medium",
-                "rationale": rationale[:5],
-                "evidence": sorted(set(evidence))[:6],
+                "score": score,
+                "confidence": confidence if len(unique_rationale) >= settings["high_confidence_min_rationale_count"] else "medium",
+                "rationale": unique_rationale[:5],
+                "evidence": unique_evidence,
+                "suppressed_by_context": suppressed_reasons or [],
             }
         )
 
+    downloader_score = 0
+    downloader_rationale: list[str] = []
+    downloader_evidence: list[str] = []
+    downloader_suppressed: list[str] = []
+    if behavior_chains["download_write_execute_chain"]["matched"]:
+        downloader_score += candidate_weights["download_chain"]
+        downloader_rationale.append("download, write, and execute evidence forms a composed chain")
+        downloader_evidence.extend(behavior_chains["download_write_execute_chain"]["evidence"])
+    if capabilities.get("downloader_behavior", {}).get("matched"):
+        downloader_score += candidate_weights["downloader_capability"]
+        downloader_rationale.append("downloader capability indicators matched")
+        downloader_evidence.extend(capabilities.get("downloader_behavior", {}).get("evidence", []))
+    if capabilities.get("networking", {}).get("matched"):
+        downloader_score += candidate_weights["networking_capability"]
+        downloader_rationale.append("networking capability indicators matched")
+        downloader_evidence.extend(capabilities.get("networking", {}).get("evidence", []))
+    if high_conf_count("urls") or high_conf_count("domains"):
+        downloader_score += (high_conf_count("urls") + high_conf_count("domains")) * candidate_weights["external_network_ioc"]
+        downloader_rationale.append("validated external network indicators were observed")
+        downloader_evidence.extend(
+            [entry["value"] for entry in _allowed_entries(high_iocs.get("urls"))[:2]]
+            + [entry["value"] for entry in _allowed_entries(high_iocs.get("domains"))[:2]]
+        )
+    if high_conf_count("commands"):
+        downloader_score += high_conf_count("commands") * candidate_weights["execution_ioc"]
+        downloader_rationale.append("meaningful execution-oriented commands were observed")
+        downloader_evidence.extend([entry["value"] for entry in _allowed_entries(high_iocs.get("commands"))[:2]])
+    if context.get("installer_like") and not strong_malicious_chain_present:
+        downloader_score -= suppressions["installer_without_malicious_chain"]
+        downloader_suppressed.append("installer-like context outweighed weak downloader residue")
+    if weak_count("urls") or weak_count("commands"):
+        downloader_score -= suppressions["weak_network_residue"]
+        downloader_suppressed.append("generic URL or command residue was treated as weak without corroboration")
+
     add_candidate(
         "likely_downloader",
-        behavior_chains["download_write_execute_chain"]["matched"]
-        or (
-            capabilities.get("downloader_behavior", {}).get("matched")
-            and grouped_strings.get("network", {}).get("matched")
-        ),
-        [
-            reason
-            for reason in [
-                "network indicators are present" if grouped_strings.get("network", {}).get("matched") else "",
-                "download-related capability matched" if capabilities.get("downloader_behavior", {}).get("matched") else "",
-                "execution behavior was also observed" if behavior_chains["download_write_execute_chain"]["matched"] else "",
-            ]
-            if reason
-        ],
-        behavior_chains["download_write_execute_chain"]["evidence"]
-        + capabilities.get("downloader_behavior", {}).get("evidence", []),
+        downloader_score,
+        downloader_rationale,
+        downloader_evidence,
+        downloader_suppressed,
     )
+
+    packed_loader_score = 0
+    packed_loader_rationale: list[str] = []
+    packed_loader_evidence: list[str] = []
+    packed_loader_suppressed: list[str] = []
+    if context.get("likely_packed"):
+        packed_loader_score += candidate_weights["packed_context"]
+        packed_loader_rationale.append("entropy profile suggests compression or packing")
+        packed_loader_evidence.extend(context.get("evidence", {}).get("high_entropy_sections", []))
+    if behavior_chains["download_write_execute_chain"]["matched"]:
+        packed_loader_score += candidate_weights["download_chain"]
+        packed_loader_rationale.append("packed context is paired with a download and execution chain")
+        packed_loader_evidence.extend(behavior_chains["download_write_execute_chain"]["evidence"])
+    if context.get("is_go") and not strong_malicious_chain_present:
+        packed_loader_score -= suppressions["go_entropy_only"]
+        packed_loader_suppressed.append("Go runtime context reduced confidence in entropy-only packing suspicion")
+
     add_candidate(
         "likely_packed_loader",
-        context.get("likely_packed")
-        and behavior_chains["download_write_execute_chain"]["matched"],
-        [
-            "high-entropy sections were observed",
-            "download or execution signals were chained together",
-        ],
-        context.get("evidence", {}).get("high_entropy_sections", [])
-        + behavior_chains["download_write_execute_chain"]["evidence"],
+        packed_loader_score,
+        packed_loader_rationale,
+        packed_loader_evidence,
+        packed_loader_suppressed,
     )
+
     add_candidate(
         "likely_credential_aware_tooling",
-        behavior_chains["credential_access_chain"]["matched"],
+        candidate_weights["credential_chain"] if behavior_chains["credential_access_chain"]["matched"] else 0,
         [
             "credential or auth-related strings were observed",
             "credential access capability indicators matched",
@@ -389,69 +471,92 @@ def infer_intents(
         behavior_chains["credential_access_chain"]["evidence"]
         + capabilities.get("credential_access_indicators", {}).get("evidence", []),
     )
+
+    installer_score = 0
+    installer_rationale: list[str] = []
+    installer_evidence: list[str] = []
+    if context.get("installer_like"):
+        installer_score += candidate_weights["installer_context"]
+        installer_rationale.append("installer or packager context is strong")
+        installer_evidence.extend(context.get("evidence", {}).get("installer_strings", []))
+    if behavior_chains["installer_or_packager_chain"]["matched"]:
+        installer_score += candidate_weights["installer_chain"]
+        installer_rationale.append("installer or packaged-application artifacts form a coherent chain")
+        installer_evidence.extend(behavior_chains["installer_or_packager_chain"]["evidence"])
+    if context.get("has_high_runtime_noise"):
+        installer_score += candidate_weights["runtime_noise"]
+        installer_rationale.append("runtime strings are dominated by framework or packaging residue")
+        installer_evidence.extend(context.get("evidence", {}).get("runtime_noise_strings", []))
+    if not strong_malicious_chain_present:
+        installer_score += 2
+        installer_rationale.append("stronger malicious chains are absent")
+
     add_candidate(
         "likely_installer_or_packaged_app",
-        behavior_chains["installer_or_packager_chain"]["matched"],
-        [
-            "installer or packager strings were observed",
-            "runtime or packaged-application noise was observed"
-            if context.get("has_high_runtime_noise")
-            else "",
-        ],
-        behavior_chains["installer_or_packager_chain"]["evidence"],
-    )
-    add_candidate(
-        "likely_managed_obfuscated_payload",
-        context.get("is_dotnet")
-        and context.get("has_sparse_imports")
-        and (context.get("likely_packed") or capabilities.get("anti_analysis", {}).get("matched")),
-        [
-            ".NET indicators were observed",
-            "the import table is sparse",
-            "packing or anti-analysis indicators were observed",
-        ],
-        context.get("evidence", {}).get("dotnet_imports", [])
-        + context.get("evidence", {}).get("dotnet_symbols", [])
-        + capabilities.get("anti_analysis", {}).get("evidence", []),
-    )
-    add_candidate(
-        "likely_benign_packaged_utility",
-        context.get("installer_like")
-        and not behavior_chains["download_write_execute_chain"]["matched"]
-        and analysis_summary.get("severity") == "low",
-        [
-            "installer-like context was observed",
-            "stronger chained behavior was not observed",
-            "overall severity remained low",
-        ],
-        context.get("evidence", {}).get("installer_strings", [])
-        + grouped_strings.get("runtime_or_language", {}).get("evidence", []),
+        installer_score,
+        installer_rationale,
+        installer_evidence,
     )
 
-    ambiguous = not candidates or all(
-        candidate["confidence"] == "medium" for candidate in candidates
+    managed_score = 0
+    managed_rationale: list[str] = []
+    managed_evidence: list[str] = []
+    if context.get("is_dotnet") and context.get("has_sparse_imports"):
+        managed_score += candidate_weights["dotnet_managed_context"]
+        managed_rationale.extend(
+            [
+                ".NET indicators were observed",
+                "the sparse import table is consistent with managed code",
+            ]
+        )
+        managed_evidence.extend(
+            context.get("evidence", {}).get("dotnet_imports", [])
+            + context.get("evidence", {}).get("dotnet_symbols", [])
+        )
+    if capabilities.get("anti_analysis", {}).get("matched"):
+        managed_score += candidate_weights["anti_analysis_capability"]
+        managed_rationale.append("anti-analysis indicators were also observed")
+        managed_evidence.extend(capabilities.get("anti_analysis", {}).get("evidence", []))
+
+    add_candidate(
+        "likely_managed_obfuscated_payload",
+        managed_score,
+        managed_rationale,
+        managed_evidence,
     )
-    if ambiguous:
+
+    ranked_candidates = sorted(
+        candidates,
+        key=lambda item: (-item["score"], item["name"]),
+    )
+    if not ranked_candidates or ranked_candidates[0]["score"] < settings["minimum_primary_score"]:
         candidates.append(
             {
                 "name": "ambiguous_requires_manual_review",
                 "matched": True,
                 "confidence": "medium",
+                "score": 0,
                 "rationale": [
                     "evidence did not support a single strong hypothesis"
                 ],
                 "evidence": analysis_summary.get("top_findings", [])[:4],
+                "suppressed_by_context": [],
             }
         )
+        ranked_candidates = sorted(
+            candidates,
+            key=lambda item: (-item["score"], item["name"]),
+        )
+
+    primary = ranked_candidates[0]["name"]
+    secondary = [
+        candidate["name"]
+        for candidate in ranked_candidates[1:]
+        if ranked_candidates[0]["score"] - candidate["score"] < settings["minimum_primary_margin"]
+    ]
 
     return {
-        "candidates": sorted(candidates, key=lambda item: (item["name"] != "ambiguous_requires_manual_review", item["name"])),
-        "primary": next(
-            (
-                candidate["name"]
-                for candidate in candidates
-                if candidate["name"] != "ambiguous_requires_manual_review"
-            ),
-            "ambiguous_requires_manual_review",
-        ),
+        "candidates": ranked_candidates,
+        "primary": primary,
+        "secondary": secondary,
     }

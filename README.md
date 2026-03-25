@@ -31,17 +31,20 @@ The project is intentionally limited to static analysis preparation. It does not
 - Explicit per-step status reporting for PE, imports, section entropy, and YARA
 - Categorized suspicious string highlights for analyst review
 - Deterministic triage scoring and quick assessment summary
-- Context-aware scoring that adjusts for runtime/language and installer context
+- Evidence-hygiene gating before strings, paths, commands, and mutex-like artifacts can influence higher-level reasoning
+- Context-aware scoring that lets runtime/language and installer context suppress weak suspicious residue
 - Packed/high-entropy assessment for PE sections
 - IOC-ready extraction and curated interesting-string preview
 - Artifact classification and IOC confidence filtering for analyst-facing highlights
 - Semantic IOC validation for version-like, local-only, and command-context artifacts
+- Path sanity checks and malformed-artifact suppression for analyst highlights
 - Separation between analyst-ready findings, contextual findings, and raw exports
-- Interpretation notes for likely installer/packager and certificate-infrastructure noise
+- Competitive primary-intent selection with optional secondary intents
+- Concise analyst-facing interpretation prose with strongest and suppressed evidence
 - Binary context detection for .NET, Go, sparse imports, installer-like packaging, and runtime noise
 - Grouped string evidence domains for behavior-oriented review
 - Deterministic behavior chaining and cautious intent inference
-- Cleaner YARA warning hygiene with partial-ruleset visibility
+- Cleaner YARA warning hygiene with explicit YARA health states
 
 ## Repository Layout
 
@@ -276,6 +279,39 @@ Additive Phase 5 fields include:
   - `primary`
   - `candidates`
 
+Additive Phase 6 fields include:
+
+- `strings.suspicious.matches[*]`
+  - `quality`
+  - `allowed_for_reasoning`
+  - `quality_reasons`
+- `strings.reasoning`
+  - `quality_summary`
+  - `categorized`
+  - `string_quality`
+- `iocs`
+  - `suppressed`
+  - `reasoning_categories`
+- `iocs.classified[*]`
+  - `quality`
+  - `allowed_for_reasoning`
+  - `quality_reasons`
+- `analysis_summary`
+  - `score_breakdown`
+  - `dominant_signal_classes`
+  - `suppressed_signal_classes`
+- `intent_inference`
+  - `secondary`
+  - `candidates[*].score`
+  - `candidates[*].suppressed_by_context`
+- `interpretation`
+  - `quick_assessment`
+  - `analyst_summary`
+  - `strongest_evidence`
+  - `suppressed_or_contextual_evidence`
+- `yara`
+  - `yara_health`
+
 ## Capability Inference
 
 Capability inference is data-driven from `config/capability_map.json`. API names, string indicators, and YARA tags or rule names map to capability categories such as persistence, networking, process execution, and process injection.
@@ -300,7 +336,7 @@ This reduces overstatement for capabilities that are supported only by weak gene
 
 ## Analysis Summary and Severity
 
-`analysis_summary` is a deterministic rule-based prioritization layer intended for fast triage. It uses local evidence already gathered during static analysis, including:
+`analysis_summary` is a deterministic rule-based prioritization layer intended for fast triage. Phase 6 rebalances it into strong, medium, and weak signal tiers so corroborated evidence dominates generic residue. It uses local evidence already gathered during static analysis, including:
 
 - matched capabilities and their confidence
 - YARA matches
@@ -312,7 +348,7 @@ This reduces overstatement for capabilities that are supported only by weak gene
 - likely-packed assessment
 - degraded-mode awareness
 
-Severity is currently derived from a bounded score:
+Severity is currently derived from a bounded score, then optionally capped by stronger contextual explanations:
 
 - `high`: score greater than or equal to the configured high threshold
 - `medium`: score greater than or equal to the configured medium threshold
@@ -324,12 +360,13 @@ Recommended next steps are intentionally simple:
 - `review_manually`
 - `investigate_deeper`
 
-Phase 5 adds context-aware adjustments while remaining rule-based:
+Phase 6 context enforcement remains rule-based:
 
-- Go binaries with runtime-heavy strings and high entropy are penalized so entropy alone does not overstate packer suspicion
-- .NET binaries with sparse imports plus packing or anti-analysis signals receive a bounded suspicion increase
-- installer-like context reduces severity unless stronger corroboration is present
-- high runtime-noise context reduces confidence in generic string-heavy results
+- Go binaries with runtime-heavy strings and high entropy no longer let entropy alone dominate severity
+- sparse imports in managed `.NET` samples are treated as meaningful context instead of generic suspicion by default
+- installer-like context can suppress malicious intent promotion and cap severity when stronger malicious chains are absent
+- weak URL or command residue contributes very little unless corroborated by stronger chain, API, or multi-source evidence
+- `analysis_summary.score_breakdown`, `dominant_signal_classes`, and `suppressed_signal_classes` explain exactly what drove or reduced the final score
 
 Scoring weights, thresholds, and context adjustments are stored locally in `config/analysis_settings.json`.
 
@@ -399,11 +436,19 @@ Phase 5 extends semantic validation for IP artifacts:
 - `1.1.1.1` and similar values are downgraded when they appear in ping, sleep, timeout, or command-testing context
 - loopback and other local-only values such as `127.0.0.1` are retained but treated as contextual rather than promoted network IOCs
 
-`iocs.high_confidence` and `iocs.contextual` are curated subsets. `iocs.classified` and the original raw IOC lists remain available for transparency.
+Phase 6 adds evidence-quality gating on top of classification:
+
+- symbol-heavy or binary-noise-like strings are marked `noisy`
+- malformed or implausible Windows paths are marked `malformed`
+- bare schemes such as `http://` and weak command-like fragments can be marked `contextual_only`
+- `allowed_for_reasoning=false` prevents those artifacts from feeding behavior chains, capability confidence, score, and primary intent
+- raw values remain exported, and `iocs.suppressed` provides a direct view of artifacts intentionally excluded from higher-level reasoning
+
+`iocs.high_confidence` and `iocs.contextual` remain curated subsets. `iocs.classified`, `iocs.suppressed`, and the original raw IOC lists remain available for transparency.
 
 ## Grouped String Domains
 
-Phase 5 adds `strings.grouped_domains`, a deterministic grouped view of extracted string evidence. Raw strings and suspicious-string matches are preserved unchanged.
+Phase 5 adds `strings.grouped_domains`, a deterministic grouped view of extracted string evidence. Phase 6 ensures the grouped view is built from reasoning-eligible evidence only, while raw strings and suspicious-string matches remain preserved.
 
 Current grouped domains include:
 
@@ -445,20 +490,28 @@ Phase 5 also adds `intent_inference`, which provides cautious analyst hypotheses
 - `likely_credential_aware_tooling`
 - `likely_installer_or_packaged_app`
 - `likely_managed_obfuscated_payload`
-- `likely_benign_packaged_utility`
 - `ambiguous_requires_manual_review`
 
-Multiple candidates may be present. These are not verdicts; they are explainable hypotheses derived from context, grouped strings, behavior chains, capabilities, and bounded triage scoring.
+Phase 6 makes intent selection competitive instead of purely additive:
+
+- candidates receive weighted scores from chains, validated IOCs, capabilities, and binary context
+- installer or packager context can beat weak downloader residue
+- the report now records one `primary` intent plus optional `secondary` intents when candidates remain close
+- candidate-level `suppressed_by_context` notes explain when context explicitly weakened a competing hypothesis
+
+These are not verdicts; they are explainable hypotheses derived from context, grouped strings, behavior chains, capabilities, and bounded triage scoring.
 
 ## Analyst-Ready vs Raw Findings
 
 `summary.md` now separates:
 
 - quick assessment
+- interpretation
 - binary context
 - analyst-ready findings
 - behavior chains
 - likely intent
+- signal scoring
 - contextual / low-confidence findings
 - interpretation notes
 - grouped string evidence
@@ -476,7 +529,7 @@ Raw exports such as `strings_ascii.txt`, `strings_utf16.txt`, `suspicious_string
 
 ## Interpretation Guardrails
 
-`interpretation` adds cautious false-positive guardrails. It does not assign malware or benign verdicts.
+`interpretation` adds cautious false-positive guardrails and short analyst-ready prose. It does not assign malware or benign verdicts.
 
 Current note families include:
 
@@ -485,7 +538,13 @@ Current note families include:
 - `suspiciousness_may_reflect_compression_or_installer_behavior`
 - `certificate_or_signing_infrastructure_present`
 
-These notes are derived only from local deterministic heuristics such as installer strings, PKI-related artifacts, and high-entropy sections without stronger corroboration.
+Phase 6 extends this section with:
+
+- `quick_assessment` for first-screen triage wording
+- `analyst_summary` that explains what evidence is strongest
+- `strongest_evidence` and `suppressed_or_contextual_evidence` so the reader can see both what drove the interpretation and what was intentionally downgraded
+
+These notes and summaries are derived only from local deterministic heuristics such as installer strings, PKI-related artifacts, high-entropy sections, behavior chains, intent inference, and curated score output.
 
 ## YARA Externals
 
@@ -507,9 +566,18 @@ rule MatchExeByExternal
 }
 ```
 
+`yara.yara_health` provides a cleaner analyst-facing top-level summary:
+
+- `healthy`
+- `healthy_with_minor_rule_errors`
+- `degraded`
+- `unavailable`
+
+Raw warnings, invalid-rule counts, and `scan_status` are still preserved for transparency.
+
 ## Interesting Strings Preview
 
-`interesting_strings_preview` is a short curated list of higher-value strings for quick review. It prefers categories such as:
+`interesting_strings_preview` is a short curated list of higher-value strings for quick review. Phase 6 restricts it to reasoning-eligible categories so malformed paths and noisy fragments do not become first-screen highlights. It prefers categories such as:
 
 - high-confidence URLs
 - high-confidence commands
@@ -520,7 +588,7 @@ rule MatchExeByExternal
 
 ## Tuning
 
-Most Phase 4 filtering and weighting behavior is configured locally in `config/analysis_settings.json`.
+Most filtering, hygiene, and weighting behavior is configured locally in `config/analysis_settings.json`.
 
 Key sections:
 
@@ -531,6 +599,7 @@ Key sections:
 - `artifact_filters.contextual_ip_values`
 - `artifact_filters.semantic_ip_rules`
 - `artifact_filters.command_high_confidence_terms`
+- `evidence_hygiene`
 - `context_detection`
 - `behavior_domains`
 - `behavior_chains`
@@ -539,7 +608,12 @@ Key sections:
 - `capabilities.per_capability_overrides`
 - `interpretation.installer_or_packager_patterns`
 - `intent_inference`
+- `intent_inference.candidate_weights`
+- `intent_inference.context_suppression`
+- `scoring.tier_weights`
+- `scoring.class_multipliers`
 - `scoring.context_adjustments`
+- `scoring.severity_caps`
 - `yara_reporting`
 
 These settings are intended to be tuned against a broader local sample set without introducing network access or nondeterministic behavior.
@@ -570,6 +644,8 @@ Pattern matching remains local and config-driven through `config/suspicious_patt
 - Context detection, behavior chains, and intent inference are heuristic and intended for analyst prioritization, not verdicting.
 - Packed assessment is entropy-based and may flag compressed or otherwise unusual but benign binaries.
 - Go binaries and managed runtimes can still produce edge cases that require local tuning against broader sample sets.
+- evidence-hygiene thresholds such as symbol-ratio and path-segment sanity rules will need tuning against a broader local sample set
+- signal-tier weights and intent competition thresholds are intentionally conservative and may need local adjustment for different software ecosystems
 - Suspicious string categorization is regex-based and may produce overlaps or benign hits; analysts should treat it as prioritization support.
 - Non-PE files and malformed PEs are handled explicitly, but they will still produce empty import data because no import table could be parsed.
 

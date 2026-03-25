@@ -15,6 +15,11 @@ from staticprep.analyzers.contextual_analysis import (
     infer_behavior_chains,
     infer_intents,
 )
+from staticprep.analyzers.evidence import (
+    assess_evidence_quality,
+    annotate_suspicious_string_matches,
+    filter_reasoning_strings,
+)
 from staticprep.analyzers.hashes import compute_hashes
 from staticprep.analyzers.interpretation import build_interpretation
 from staticprep.analyzers.iocs import build_interesting_strings_preview, classify_iocs, extract_iocs
@@ -161,6 +166,10 @@ def analyze_sample(
             ascii_strings + utf16_strings,
             suspicious_patterns,
         )
+        suspicious_strings = annotate_suspicious_string_matches(
+            suspicious_strings,
+            analysis_settings,
+        )
 
     pe_info: dict[str, Any] = _default_pe_status(skipped=skip_pe, error="PE parsing skipped by flag." if skip_pe else None)
     imports: dict[str, Any] = _default_imports_status(skipped=skip_pe, error="Import extraction skipped by flag." if skip_pe else None)
@@ -225,16 +234,48 @@ def analyze_sample(
             "invalid": 0,
         },
         "scan_status": "skipped_by_flag" if skip_yara else "not_started",
+        "yara_health": "unavailable" if skip_yara else "degraded",
     }
     if not skip_yara:
         raw_yara, yara_errors = run_yara_scan(sample_path, rules_dir or DEFAULT_RULES_DIR)
         yara_results = raw_yara
         errors.extend(AnalysisError(**error) for error in yara_errors)
 
+    all_strings = [match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings
+    reasoning_strings, string_quality = filter_reasoning_strings(
+        all_strings,
+        analysis_settings,
+    )
+    category_artifact_types = {
+        "file_paths": "file_path",
+        "commands_or_lolbins": "command",
+        "powershell": "command",
+        "urls": "suspicious_string",
+        "ips": "suspicious_string",
+        "domains": "suspicious_string",
+        "registry_paths": "suspicious_string",
+        "appdata_or_temp": "file_path",
+        "other": "suspicious_string",
+    }
+    reasoning_suspicious_categories = {
+        category: sorted(
+            {
+                value
+                for value in values
+                if assess_evidence_quality(
+                    value,
+                    category_artifact_types.get(category, "suspicious_string"),
+                    analysis_settings,
+                )["allowed_for_reasoning"]
+            }
+        )
+        for category, values in suspicious_categories.items()
+    }
+
     capabilities = infer_capabilities(
         capability_map=capability_map,
         apis=imports["flat"],
-        strings=[match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings,
+        strings=reasoning_strings,
         yara_matches=yara_results["matches"],
         capability_settings=analysis_settings["capabilities"],
     )
@@ -251,7 +292,6 @@ def analyze_sample(
         for name, result in capabilities.items()
     }
 
-    all_strings = [match["value"] for match in suspicious_strings] + ascii_strings + utf16_strings
     packed_assessment = assess_packed_status(pe_info, analysis_settings)
     context = detect_binary_context(
         imports=imports,
@@ -267,10 +307,10 @@ def analyze_sample(
         context_strings=all_strings,
         binary_context=context,
     )
-    iocs = {**raw_iocs, **ioc_views}
+    iocs = {**raw_iocs, **ioc_views, "reasoning_categories": reasoning_suspicious_categories}
     grouped_string_domains = group_strings_by_behavior(
-        all_strings=all_strings,
-        suspicious_categories=suspicious_categories,
+        all_strings=reasoning_strings,
+        suspicious_categories=reasoning_suspicious_categories,
         analysis_settings=analysis_settings,
     )
     behavior_chains = infer_behavior_chains(
@@ -295,22 +335,36 @@ def analyze_sample(
         context=context,
         behavior_chains=behavior_chains,
     )
-    interpretation = build_interpretation(
-        all_strings=all_strings,
-        iocs=iocs,
-        packed_assessment=packed_assessment,
-        capabilities=capabilities_dict,
-        yara_results=yara_results,
-        analysis_settings=analysis_settings,
-    )
     intent_inference = infer_intents(
         context=context,
         capabilities=capabilities_dict,
         behavior_chains=behavior_chains,
         grouped_strings=grouped_string_domains,
+        iocs=iocs,
         analysis_summary=analysis_summary,
         analysis_settings=analysis_settings,
     )
+    interpretation = build_interpretation(
+        all_strings=all_strings,
+        iocs=iocs,
+        context=context,
+        behavior_chains=behavior_chains,
+        intent_inference=intent_inference,
+        analysis_summary=analysis_summary,
+        packed_assessment=packed_assessment,
+        capabilities=capabilities_dict,
+        yara_results=yara_results,
+        analysis_settings=analysis_settings,
+    )
+    reasoning_quality_summary = {
+        "total_strings_reviewed": len(string_quality),
+        "reasoning_eligible_count": len(reasoning_strings),
+        "suppressed_count": sum(1 for entry in string_quality if not entry["allowed_for_reasoning"]),
+        "by_quality": {
+            quality: sum(1 for entry in string_quality if entry["quality"] == quality)
+            for quality in ("clean", "noisy", "malformed", "contextual_only")
+        },
+    }
     findings = build_findings(
         analysis_summary=analysis_summary,
         capabilities=capabilities_dict,
@@ -342,6 +396,11 @@ def analyze_sample(
             "ascii_count": len(ascii_strings),
             "utf16_count": len(utf16_strings),
             "suspicious_count": len(suspicious_strings),
+            "reasoning": {
+                "quality_summary": reasoning_quality_summary,
+                "categorized": reasoning_suspicious_categories,
+                "string_quality": string_quality,
+            },
             "grouped_domains": grouped_string_domains,
             "suspicious": {
                 "matches": suspicious_strings,

@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 
+SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+
 def assess_packed_status(
     pe_info: dict[str, Any],
     analysis_settings: dict[str, Any],
@@ -80,15 +83,72 @@ def build_analysis_summary(
     behavior_chains: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic top-level triage summary."""
-    weights = analysis_settings["scoring"]["weights"]
+    tier_weights = analysis_settings["scoring"]["tier_weights"]
+    multipliers = analysis_settings["scoring"]["class_multipliers"]
     thresholds = analysis_settings["scoring"]["severity_thresholds"]
     adjustments = analysis_settings["scoring"].get("context_adjustments", {})
+    severity_caps = analysis_settings["scoring"].get("severity_caps", {})
     context = context or {}
     behavior_chains = behavior_chains or {}
+    classified_iocs = iocs.get("classified", {})
 
     score = 0
     reasons: list[str] = []
     top_findings: list[str] = []
+    breakdown: list[dict[str, Any]] = []
+    suppressed_signal_classes: list[str] = []
+
+    def add_signal(
+        signal_class: str,
+        tier: str,
+        count: int,
+        reason: str,
+        top_finding: str | None = None,
+        multiplier_key: str | None = None,
+        suppressed: bool = False,
+    ) -> None:
+        nonlocal score
+        if count <= 0:
+            return
+        multiplier = multipliers.get(multiplier_key or signal_class, 1.0)
+        delta = int(round(tier_weights[tier] * count * multiplier))
+        if suppressed:
+            suppressed_signal_classes.append(signal_class)
+            breakdown.append(
+                {
+                    "signal_class": signal_class,
+                    "tier": tier,
+                    "count": count,
+                    "delta": 0,
+                    "suppressed": True,
+                    "reason": reason,
+                }
+            )
+            return
+        score += delta
+        reasons.append(reason)
+        breakdown.append(
+            {
+                "signal_class": signal_class,
+                "tier": tier,
+                "count": count,
+                "delta": delta,
+                "suppressed": False,
+                "reason": reason,
+            }
+        )
+        if top_finding:
+            top_findings.append(top_finding)
+
+    def low_conf_count(artifact_type: str) -> int:
+        return len(
+            [
+                entry
+                for entry in classified_iocs.get(artifact_type, [])
+                if entry.get("classification") == "low_confidence"
+                and entry.get("allowed_for_reasoning", False)
+            ]
+        )
 
     high_caps = sorted(
         [name for name, data in capabilities.items() if data["matched"] and data["confidence"] == "high"]
@@ -101,93 +161,165 @@ def build_analysis_summary(
     )
 
     if high_caps:
-        score += len(high_caps) * weights["high_confidence_capability"]
-        reasons.append(f"{len(high_caps)} high-confidence capability match(es)")
-        top_findings.append(f"High-confidence capabilities: {', '.join(high_caps[:3])}")
+        add_signal(
+            "high_confidence_capability",
+            "strong",
+            len(high_caps),
+            f"{len(high_caps)} high-confidence capability match(es)",
+            f"High-confidence capabilities: {', '.join(high_caps[:3])}",
+        )
     if medium_caps:
-        score += len(medium_caps) * weights["medium_confidence_capability"]
-        reasons.append(f"{len(medium_caps)} medium-confidence capability match(es)")
+        add_signal(
+            "medium_confidence_capability",
+            "medium",
+            len(medium_caps),
+            f"{len(medium_caps)} medium-confidence capability match(es)",
+        )
     if low_caps:
-        score += len(low_caps) * weights["low_confidence_capability"]
-        reasons.append(f"{len(low_caps)} low-confidence capability match(es)")
-
-    if yara_results.get("match_count", 0):
-        score += yara_results["match_count"] * weights["yara_hit"]
-        reasons.append(f"{yara_results['match_count']} YARA match(es)")
-        top_findings.append(f"YARA hits: {', '.join(match['rule'] for match in yara_results['matches'][:3])}")
-
-    high_entropy_sections = packed_assessment.get("high_entropy_sections", [])
-    if high_entropy_sections:
-        score += len(high_entropy_sections) * weights["high_entropy_section"]
-        reasons.append(f"{len(high_entropy_sections)} high-entropy PE section(s)")
-        top_findings.append(
-            "High-entropy sections: "
-            + ", ".join(section["name"] for section in high_entropy_sections[:3])
+        add_signal(
+            "low_confidence_capability",
+            "weak",
+            len(low_caps),
+            f"{len(low_caps)} low-confidence capability match(es)",
         )
 
-    if packed_assessment.get("likely_packed"):
-        score += weights["likely_packed"]
-        reasons.append("Entropy profile suggests the sample may be packed")
-        top_findings.append("Likely packed based on PE section entropy")
+    if yara_results.get("match_count", 0):
+        add_signal(
+            "yara_match",
+            "strong",
+            yara_results["match_count"],
+            f"{yara_results['match_count']} YARA match(es)",
+            f"YARA hits: {', '.join(match['rule'] for match in yara_results['matches'][:3])}",
+        )
 
+    high_entropy_sections = packed_assessment.get("high_entropy_sections", [])
     high_iocs = iocs.get("high_confidence", {})
     contextual_iocs = iocs.get("contextual", {})
 
-    url_count = len(high_iocs.get("urls", []))
+    validated_urls = len(high_iocs.get("urls", []))
+    validated_domains = len(high_iocs.get("domains", []))
     registry_count = len(high_iocs.get("registry_paths", []))
     command_count = len(high_iocs.get("commands", []))
+    file_path_count = len(high_iocs.get("file_paths", []))
+    low_conf_url_count = low_conf_count("urls")
+    low_conf_command_count = low_conf_count("commands")
 
-    if url_count:
-        score += url_count * weights["suspicious_url"]
-        reasons.append(f"{url_count} high-confidence URL indicator(s)")
-        top_findings.append("High-confidence network indicators were identified")
+    strong_malicious_chain_present = any(
+        behavior_chains.get(name, {}).get("matched")
+        for name in (
+            "download_write_execute_chain",
+            "persistence_chain",
+            "credential_access_chain",
+        )
+    )
+
+    if validated_urls or validated_domains:
+        add_signal(
+            "external_url_or_domain",
+            "strong",
+            validated_urls + validated_domains,
+            f"{validated_urls + validated_domains} validated external URL/domain indicator(s)",
+            "Validated external network indicators were identified",
+        )
     if registry_count:
-        score += registry_count * weights["suspicious_registry_path"]
-        reasons.append(f"{registry_count} high-confidence registry path indicator(s)")
-        top_findings.append("Persistence-relevant registry paths were identified")
+        add_signal(
+            "registry_path",
+            "medium",
+            registry_count,
+            f"{registry_count} validated registry path indicator(s)",
+            "Persistence-relevant registry paths were identified",
+        )
     if command_count:
-        score += command_count * weights["suspicious_command"]
-        reasons.append(f"{command_count} high-confidence command indicator(s)")
-        top_findings.append("Strong suspicious command strings were identified")
-    if contextual_iocs.get("commands"):
-        score += len(contextual_iocs["commands"]) * weights["contextual_command"]
-        reasons.append(f"{len(contextual_iocs['commands'])} low-confidence command indicator(s)")
-        top_findings.append("Command-like strings were identified but some are contextual only")
+        add_signal(
+            "command",
+            "medium",
+            command_count,
+            f"{command_count} meaningful command indicator(s)",
+            "Meaningful suspicious command strings were identified",
+        )
+    if file_path_count:
+        add_signal(
+            "file_path",
+            "medium",
+            file_path_count,
+            f"{file_path_count} validated Windows file path indicator(s)",
+        )
+    if low_conf_url_count:
+        add_signal(
+            "weak_network_residue",
+            "weak",
+            low_conf_url_count,
+            f"{low_conf_url_count} weak URL indicator(s) were retained as low-confidence residue",
+        )
+    if low_conf_command_count:
+        add_signal(
+            "weak_command_residue",
+            "weak",
+            low_conf_command_count,
+            f"{low_conf_command_count} weak command indicator(s) were retained as low-confidence residue",
+        )
 
     for chain_name, chain in sorted(behavior_chains.items()):
         if chain.get("matched"):
-            score += weights["behavior_chain"]
-            reasons.append(f"Behavior chain matched: {chain_name}")
-            top_findings.append(
-                chain_name.replace("_", " ")
+            add_signal(
+                f"behavior_chain:{chain_name}",
+                "strong" if chain.get("confidence") == "high" else "medium",
+                1,
+                f"Behavior chain matched: {chain_name}",
+                chain_name.replace("_", " "),
+                multiplier_key=f"behavior_chain_{chain.get('confidence', 'medium')}",
             )
 
-    if context.get("is_go") and packed_assessment.get("likely_packed"):
-        score += adjustments["go_high_entropy_penalty"]
-        reasons.append("Go runtime context reduced confidence in entropy-only packing suspicion")
-
-    if (
-        context.get("is_dotnet")
-        and context.get("has_sparse_imports")
-        and (
-            packed_assessment.get("likely_packed")
-            or capabilities.get("anti_analysis", {}).get("matched")
+    entropy_only_suppressed = False
+    if high_entropy_sections:
+        suppressed = context.get("is_go") and not strong_malicious_chain_present
+        entropy_only_suppressed = suppressed
+        add_signal(
+            "packed_entropy",
+            "medium",
+            len(high_entropy_sections),
+            f"{len(high_entropy_sections)} high-entropy PE section(s)",
+            "High-entropy sections were identified",
+            suppressed=suppressed,
         )
-    ):
-        score += adjustments["dotnet_sparse_obfuscated_bonus"]
-        reasons.append(".NET plus sparse imports and obfuscation indicators increased suspicion")
-        top_findings.append(".NET sparse-import profile with obfuscation indicators")
+    if packed_assessment.get("likely_packed"):
+        suppressed = (
+            (context.get("is_go") and not strong_malicious_chain_present)
+            or (context.get("installer_like") and not strong_malicious_chain_present)
+        )
+        add_signal(
+            "likely_packed",
+            "medium",
+            1,
+            "Entropy profile suggests the sample may be packed or compressed",
+            "Likely packed based on PE section entropy",
+            suppressed=suppressed,
+        )
+
+    if context.get("is_go") and packed_assessment.get("likely_packed") and not strong_malicious_chain_present:
+        score += adjustments["go_entropy_only_penalty"]
+        reasons.append("Go runtime context reduced confidence in entropy-only packing suspicion")
+        suppressed_signal_classes.append("go_entropy_only")
+
+    if context.get("is_dotnet") and context.get("has_sparse_imports") and not strong_malicious_chain_present:
+        score += adjustments["dotnet_sparse_imports_penalty"]
+        reasons.append(".NET sparse imports were treated as managed-runtime context rather than generic suspicion")
+        suppressed_signal_classes.append("dotnet_sparse_imports")
 
     if context.get("installer_like"):
         score += adjustments["installer_like_penalty"]
         reasons.append("Installer-like context reduced severity absent stronger corroboration")
+        if not strong_malicious_chain_present and (low_conf_url_count or low_conf_command_count):
+            score += adjustments["installer_weak_signal_suppression"]
+            reasons.append("Installer context suppressed weak downloader or network residue")
+            suppressed_signal_classes.extend(["weak_network_residue", "weak_command_residue"])
 
     if context.get("has_high_runtime_noise"):
         score += adjustments["runtime_noise_penalty"]
         reasons.append("High runtime-noise context reduced confidence in generic string hits")
 
     if environment.get("degraded_mode"):
-        score += weights["degraded_mode_penalty"]
+        score += int(round(tier_weights["medium"] * multipliers["degraded_mode_penalty"]))
         reasons.append("Runtime degraded mode reduced available evidence")
         top_findings.append("Analysis ran in degraded mode")
 
@@ -202,8 +334,30 @@ def build_analysis_summary(
         severity = "low"
         recommended_next_step = "archive"
 
+    if context.get("installer_like") and not strong_malicious_chain_present:
+        capped = severity_caps.get("installer_without_malicious_chain")
+        if capped and SEVERITY_ORDER[severity] > SEVERITY_ORDER[capped]:
+            severity = capped
+            recommended_next_step = "archive" if capped == "low" else "review_manually"
+    if context.get("is_go") and entropy_only_suppressed and not strong_malicious_chain_present:
+        capped = severity_caps.get("go_entropy_only")
+        if capped and SEVERITY_ORDER[severity] > SEVERITY_ORDER[capped]:
+            severity = capped
+            recommended_next_step = "archive" if capped == "low" else "review_manually"
+
     if not top_findings:
-        top_findings.append("No strong static indicators were identified")
+        if environment.get("degraded_mode"):
+            top_findings.append("Analysis ran in degraded mode")
+        else:
+            top_findings.append("No strong static indicators were identified")
+
+    dominant_signal_classes = [
+        item["signal_class"]
+        for item in sorted(
+            [entry for entry in breakdown if not entry["suppressed"] and entry["delta"] > 0],
+            key=lambda entry: (-entry["delta"], entry["signal_class"]),
+        )[:4]
+    ]
 
     return {
         "severity": severity,
@@ -211,6 +365,9 @@ def build_analysis_summary(
         "top_findings": top_findings[:5],
         "reasons": reasons[:10],
         "recommended_next_step": recommended_next_step,
+        "score_breakdown": breakdown,
+        "dominant_signal_classes": dominant_signal_classes,
+        "suppressed_signal_classes": sorted(set(suppressed_signal_classes)),
     }
 
 
@@ -270,6 +427,23 @@ def build_findings(
                     "evidence": [entry["value"]],
                     "classification": entry["classification"],
                     "notes": entry["reasons"],
+                    "quality": entry.get("quality"),
+                    "allowed_for_reasoning": entry.get("allowed_for_reasoning"),
+                }
+            )
+
+    for artifact_type, entries in sorted(iocs.get("suppressed", {}).items()):
+        for entry in entries:
+            contextual.append(
+                {
+                    "type": "suppressed_ioc",
+                    "name": artifact_type,
+                    "confidence": "suppressed",
+                    "evidence": [entry["value"]],
+                    "classification": entry["classification"],
+                    "notes": entry["quality_reasons"] + entry["reasons"],
+                    "quality": entry.get("quality"),
+                    "allowed_for_reasoning": entry.get("allowed_for_reasoning"),
                 }
             )
 
@@ -315,6 +489,8 @@ def build_findings(
         "score": analysis_summary["score"],
         "analysis_degraded": any(error["stage"] == "environment" for error in errors),
         "top_findings": analysis_summary["top_findings"],
+        "dominant_signal_classes": analysis_summary.get("dominant_signal_classes", []),
+        "suppressed_signal_classes": analysis_summary.get("suppressed_signal_classes", []),
     }
 
     raw_references = {

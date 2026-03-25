@@ -220,7 +220,7 @@ def test_grouped_domains_behavior_chains_and_intent_inference():
         context=context,
         behavior_chains=chains,
     )
-    intents = infer_intents(context, capabilities, chains, grouped, summary, settings)
+    intents = infer_intents(context, capabilities, chains, grouped, iocs, summary, settings)
 
     assert grouped["network"]["matched"] is True
     assert grouped["execution"]["matched"] is True
@@ -244,32 +244,61 @@ def test_summary_markdown_includes_phase5_sections():
             "evidence": {},
             "rationale": [".NET indicators were observed"],
         },
-        "analysis_summary": {"severity": "high", "score": 75, "recommended_next_step": "investigate_deeper", "top_findings": ["Likely packed"], "reasons": []},
+        "analysis_summary": {
+            "severity": "high",
+            "score": 75,
+            "recommended_next_step": "investigate_deeper",
+            "top_findings": ["Likely packed"],
+            "reasons": [],
+            "dominant_signal_classes": ["behavior_chain:download_write_execute_chain"],
+            "suppressed_signal_classes": [],
+            "score_breakdown": [],
+        },
         "findings": {
-            "executive_summary": {"worth_deeper_investigation": True, "analysis_degraded": False, "top_findings": ["Likely packed"]},
+            "executive_summary": {
+                "worth_deeper_investigation": True,
+                "analysis_degraded": False,
+                "top_findings": ["Likely packed"],
+                "dominant_signal_classes": ["behavior_chain:download_write_execute_chain"],
+                "suppressed_signal_classes": [],
+            },
             "analyst_ready": [],
             "contextual": [],
             "raw_references": {"artifact_files": ["report.json"]},
         },
-        "interpretation": {"notes": [], "codes": [], "summary": []},
+        "interpretation": {
+            "notes": [],
+            "codes": [],
+            "summary": [],
+            "quick_assessment": "Corroborated execution-oriented behavior is present and outweighs generic context.",
+            "analyst_summary": "This sample demonstrates a clear download, write, and execute chain.",
+            "strongest_evidence": ["powershell.exe"],
+            "suppressed_or_contextual_evidence": [],
+        },
         "environment": {"pefile_available": True, "yara_available": True, "degraded_mode": False, "degraded_reasons": []},
         "behavior_chains": {
             "download_write_execute_chain": {"matched": True, "confidence": "high", "evidence": ["powershell.exe"], "evidence_sources": ["grouped_strings"]},
         },
         "intent_inference": {
             "primary": "likely_downloader",
-            "candidates": [{"name": "likely_downloader", "confidence": "high", "evidence": ["powershell.exe"], "rationale": ["network indicators are present"]}],
+            "secondary": [],
+            "candidates": [{"name": "likely_downloader", "score": 12, "confidence": "high", "evidence": ["powershell.exe"], "rationale": ["network indicators are present"], "suppressed_by_context": []}],
         },
         "packed_assessment": {"likely_packed": True, "high_entropy_sections": [], "rationale": "", "attempted": True, "succeeded": True, "skipped": False, "error": None, "threshold_used": 7.2},
         "iocs": {
             "high_confidence": {"urls": [], "domains": [], "registry_paths": [], "commands": [], "ips": [], "file_paths": [], "mutexes": []},
             "contextual": {"urls": [], "file_paths": [], "domains": [], "registry_paths": [], "commands": [], "ips": [], "mutexes": []},
-            "raw_summary": {"total": 0},
+            "suppressed": {"urls": [], "file_paths": [], "domains": [], "registry_paths": [], "commands": [], "ips": [], "mutexes": []},
+            "raw_summary": {"total": 0, "by_quality": {"clean": 0, "noisy": 0, "malformed": 0, "contextual_only": 0}},
         },
         "interesting_strings_preview": [],
         "hashes": {"md5": "a", "sha1": "b", "sha256": "c"},
-        "strings": {"suspicious_count": 0, "grouped_domains": {"network": {"matched": True, "count": 1, "source_categories": ["urls"], "evidence": ["https://x"]}}},
-        "yara": {"scan_status": "completed", "attempted": True, "succeeded": True, "match_count": 0, "rule_stats": {"discovered": 0, "valid": 0, "invalid": 0}, "matches": [], "warnings": []},
+        "strings": {
+            "suspicious_count": 0,
+            "reasoning": {"quality_summary": {"reasoning_eligible_count": 0, "suppressed_count": 0}},
+            "grouped_domains": {"network": {"matched": True, "count": 1, "source_categories": ["urls"], "evidence": ["https://x"]}},
+        },
+        "yara": {"scan_status": "completed", "attempted": True, "succeeded": True, "match_count": 0, "rule_stats": {"discovered": 0, "valid": 0, "invalid": 0}, "matches": [], "warnings": [], "yara_health": "healthy"},
         "errors": [],
     }
 
@@ -279,3 +308,5 @@ def test_summary_markdown_includes_phase5_sections():
     assert "## Behavior Chains" in summary
     assert "## Likely Intent" in summary
     assert "## Grouped String Evidence" in summary
+    assert "## Signal Scoring" in summary
+    assert "YARA health" in summary

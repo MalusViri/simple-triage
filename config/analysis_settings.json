@@ -127,6 +127,18 @@
       "tauri"
     ]
   },
+  "evidence_hygiene": {
+    "noise_symbol_ratio": 0.35,
+    "binary_noise_symbol_ratio": 0.22,
+    "binary_noise_max_alpha_ratio": 0.28,
+    "binary_noise_min_length": 12,
+    "max_symbol_run": 4,
+    "max_path_segment_length": 80,
+    "minimum_command_length": 8,
+    "minimum_mutex_length": 8,
+    "mutex_symbol_ratio": 0.3,
+    "contextual_only_min_length": 7
+  },
   "capabilities": {
     "source_weights": {
       "API": 3,
@@ -360,7 +372,28 @@
     }
   },
   "intent_inference": {
-    "high_confidence_min_rationale_count": 3
+    "high_confidence_min_rationale_count": 3,
+    "minimum_primary_score": 8,
+    "minimum_primary_margin": 3,
+    "candidate_weights": {
+      "download_chain": 10,
+      "downloader_capability": 6,
+      "networking_capability": 4,
+      "external_network_ioc": 3,
+      "execution_ioc": 3,
+      "installer_context": 8,
+      "installer_chain": 7,
+      "runtime_noise": 3,
+      "packed_context": 3,
+      "credential_chain": 8,
+      "dotnet_managed_context": 5,
+      "anti_analysis_capability": 3
+    },
+    "context_suppression": {
+      "installer_without_malicious_chain": 6,
+      "go_entropy_only": 4,
+      "weak_network_residue": 3
+    }
   },
   "interpretation": {
     "installer_or_packager_patterns": [
@@ -384,36 +417,48 @@
       "ocsp",
       "crl"
     ],
-    "minimum_installer_signals": 2
+    "minimum_installer_signals": 2,
+    "max_strongest_evidence_items": 3,
+    "max_suppressed_evidence_items": 3
   },
   "yara_reporting": {
     "warning_excerpt_limit": 5
   },
   "scoring": {
-    "weights": {
-      "high_confidence_capability": 20,
-      "medium_confidence_capability": 12,
-      "low_confidence_capability": 6,
-      "behavior_chain": 8,
-      "yara_hit": 18,
-      "high_entropy_section": 10,
-      "likely_packed": 15,
-      "suspicious_url": 6,
-      "suspicious_registry_path": 5,
-      "suspicious_command": 5,
-      "contextual_command": 2,
-      "suspicious_powershell": 7,
-      "degraded_mode_penalty": -10
+    "tier_weights": {
+      "strong": 18,
+      "medium": 7,
+      "weak": 2
+    },
+    "class_multipliers": {
+      "high_confidence_capability": 1.0,
+      "medium_confidence_capability": 1.0,
+      "low_confidence_capability": 1.0,
+      "behavior_chain_high": 1.0,
+      "behavior_chain_medium": 0.8,
+      "yara_match": 1.0,
+      "external_url_or_domain": 1.0,
+      "registry_path": 1.0,
+      "command": 1.0,
+      "file_path": 0.7,
+      "packed_entropy": 0.6,
+      "likely_packed": 0.8,
+      "degraded_mode_penalty": -1.0
     },
     "context_adjustments": {
-      "go_high_entropy_penalty": -10,
-      "dotnet_sparse_obfuscated_bonus": 10,
-      "installer_like_penalty": -12,
-      "runtime_noise_penalty": -5
+      "go_entropy_only_penalty": -12,
+      "installer_like_penalty": -10,
+      "installer_weak_signal_suppression": -8,
+      "dotnet_sparse_imports_penalty": -5,
+      "runtime_noise_penalty": -4
     },
     "severity_thresholds": {
       "high": 55,
       "medium": 25
+    },
+    "severity_caps": {
+      "installer_without_malicious_chain": "low",
+      "go_entropy_only": "low"
     }
   }
 }
