@@ -40,6 +40,7 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "behavior_chains",
         "capabilities",
         "context",
+        "correlated_behaviors",
         "environment",
         "errors",
         "findings",
@@ -129,6 +130,7 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
     assert "## Binary Context" in summary
     assert "## Top Findings" in summary
     assert "## Behavior Chains" in summary
+    assert "## Correlated Behaviors" in summary
     assert "## Likely Intent" in summary
     assert "## Signal Scoring" in summary
     assert "## Analyst-Ready Findings" in summary

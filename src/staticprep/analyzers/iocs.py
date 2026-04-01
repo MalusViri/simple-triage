@@ -174,9 +174,20 @@ def _classify_ip(
         return "malformed", ["invalid_ipv4_address"]
 
     semantic = settings.get("semantic_ip_rules", {})
+    octets = value.split(".")
+    version_thresholds = semantic.get("version_like_octet_thresholds", {})
 
     if value in settings["contextual_ip_values"]:
         return "contextual_only", ["manifest_or_version_like_value"]
+    if (
+        len(octets) == 4
+        and octets[2:] == ["0", "0"]
+        and octets[0].isdigit()
+        and octets[1].isdigit()
+        and int(octets[0]) <= version_thresholds.get("max_major", -1)
+        and int(octets[1]) <= version_thresholds.get("max_minor", -1)
+    ):
+        return "contextual_only", ["version_like_ipv4_pattern"]
     if value in semantic.get("local_only_ip_values", []):
         return "contextual_only", ["local_only_address"]
     if _context_matches(value, context_strings, semantic.get("version_context_terms", [])) and (

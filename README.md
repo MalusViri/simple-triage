@@ -31,6 +31,7 @@ The project is intentionally limited to static analysis preparation. It does not
 - Explicit per-step status reporting for PE, imports, section entropy, and YARA
 - Categorized suspicious string highlights for analyst review
 - Deterministic triage scoring and quick assessment summary
+- Compact default CLI triage summary after single-sample analysis
 - Evidence-hygiene gating before strings, paths, commands, and mutex-like artifacts can influence higher-level reasoning
 - Context-aware scoring that lets runtime/language and installer context suppress weak suspicious residue
 - Packed/high-entropy assessment for PE sections
@@ -44,6 +45,7 @@ The project is intentionally limited to static analysis preparation. It does not
 - Binary context detection for .NET, Go, sparse imports, installer-like packaging, and runtime noise
 - Grouped string evidence domains for behavior-oriented review
 - Deterministic behavior chaining and cautious intent inference
+- Deterministic behavior correlation that turns existing signals into a few higher-value analyst behavior patterns
 - Cleaner YARA warning hygiene with explicit YARA health states
 
 ## Repository Layout
@@ -107,6 +109,20 @@ staticprep analyze ./samples/example.exe --output ./output
 staticprep analyze ./samples/example.exe --rules ./rules/yara
 ```
 
+Single-sample analysis now prints a compact terminal triage summary by default. It is generated directly from structured analysis results and does not replace `report.json` or `summary.md`.
+
+The terminal summary is intentionally brief and includes:
+
+- sample name
+- SHA256
+- severity
+- likely behavior
+- recommended next step
+- top findings
+- notable analyst-relevant IOCs when present
+- context flags such as `.NET`, `Go`, likely packed, and degraded mode
+- a short next-analysis-path list
+
 Batch mode:
 
 ```bash
@@ -162,6 +178,7 @@ output/<sample_stem>_<short_sha256>/
 - `packed_assessment`
 - `iocs`
 - `behavior_chains`
+- `correlated_behaviors`
 - `intent_inference`
 - `interesting_strings_preview`
 - `hashes`
@@ -312,6 +329,20 @@ Additive Phase 6 fields include:
 - `yara`
   - `yara_health`
 
+Additive behavior-correlation fields include:
+
+- `correlated_behaviors[*]`
+  - `name`
+  - `matched`
+  - `confidence`
+  - `score`
+  - `summary_label`
+  - `recommended_next_step`
+  - `severity_hint`
+  - `evidence`
+  - `rationale`
+  - `analyst_next_steps`
+
 ## Capability Inference
 
 Capability inference is data-driven from `config/capability_map.json`. API names, string indicators, and YARA tags or rule names map to capability categories such as persistence, networking, process execution, and process injection.
@@ -444,6 +475,8 @@ Phase 6 adds evidence-quality gating on top of classification:
 - `allowed_for_reasoning=false` prevents those artifacts from feeding behavior chains, capability confidence, score, and primary intent
 - raw values remain exported, and `iocs.suppressed` provides a direct view of artifacts intentionally excluded from higher-level reasoning
 
+Additional semantic IP hygiene now suppresses version-like values such as `3.5.0.0`, `4.0.0.0`, and `17.0.0.0` from analyst-ready IP highlights when they fit deterministic version-style patterns.
+
 `iocs.high_confidence` and `iocs.contextual` remain curated subsets. `iocs.classified`, `iocs.suppressed`, and the original raw IOC lists remain available for transparency.
 
 ## Grouped String Domains
@@ -500,6 +533,53 @@ Phase 6 makes intent selection competitive instead of purely additive:
 - candidate-level `suppressed_by_context` notes explain when context explicitly weakened a competing hypothesis
 
 These are not verdicts; they are explainable hypotheses derived from context, grouped strings, behavior chains, capabilities, and bounded triage scoring.
+
+## Correlated Behavior Layer
+
+`correlated_behaviors` is a deterministic layer above raw capabilities, grouped strings, IOCs, behavior chains, and binary context. It is intended to improve direction-setting for analysts without expanding into family classification or dynamic analysis.
+
+Current patterns include:
+
+- `likely_downloader_or_dropper`
+- `likely_process_injection_loader`
+- `likely_obfuscated_loader`
+- `likely_installer_or_packaged_app`
+- `benign_or_low_signal_packaged_runtime`
+
+This layer influences:
+
+- `analysis_summary.top_findings`
+- `analysis_summary.recommended_next_step`
+- `interpretation.quick_assessment`
+- `interpretation.analyst_summary`
+- `intent_inference.primary`
+- the default CLI triage summary
+
+The correlation layer is intentionally conservative:
+
+- installer or packaged-app context can suppress weak downloader residue, but not a strong malicious chain
+- runtime-heavy `.NET` or `Go` context can win when stronger malicious corroboration is absent
+- anti-analysis boosts stronger behaviors but does not dominate severity by itself
+- YARA may support a conclusion, but correlated behavior does not require YARA to match
+
+## Configuration
+
+Local tuning remains data-driven through `config/analysis_settings.json`.
+
+Relevant sections now include:
+
+- `behavior_correlation`
+  - pattern thresholds
+  - weighting
+  - canonical process-injection API groups
+  - command-based self-delete patterns
+  - analyst next-step guidance
+- `cli_summary`
+  - compact terminal summary limits
+- `artifact_filters.semantic_ip_rules.version_like_octet_thresholds`
+  - deterministic suppression of version-like IPv4 values
+- `intent_inference.behavior_correlation_candidate_weights`
+  - weighting for intent selection when a correlated behavior matches
 
 ## Analyst-Ready vs Raw Findings
 

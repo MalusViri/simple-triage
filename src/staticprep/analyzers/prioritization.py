@@ -81,6 +81,7 @@ def build_analysis_summary(
     analysis_settings: dict[str, Any],
     context: dict[str, Any] | None = None,
     behavior_chains: dict[str, Any] | None = None,
+    correlated_behaviors: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic top-level triage summary."""
     tier_weights = analysis_settings["scoring"]["tier_weights"]
@@ -90,6 +91,7 @@ def build_analysis_summary(
     severity_caps = analysis_settings["scoring"].get("severity_caps", {})
     context = context or {}
     behavior_chains = behavior_chains or {}
+    correlated_behaviors = correlated_behaviors or []
     classified_iocs = iocs.get("classified", {})
 
     score = 0
@@ -270,6 +272,19 @@ def build_analysis_summary(
                 multiplier_key=f"behavior_chain_{chain.get('confidence', 'medium')}",
             )
 
+    matched_correlated_behaviors = [
+        behavior for behavior in correlated_behaviors if behavior.get("matched")
+    ]
+    for behavior in matched_correlated_behaviors:
+        behavior_name = behavior["name"]
+        add_signal(
+            f"correlated_behavior:{behavior_name}",
+            "strong" if behavior.get("confidence") == "high" else "medium",
+            1,
+            f"Correlated behavior matched: {behavior_name}",
+            f"Likely behavior: {behavior.get('summary_label', behavior_name.replace('_', ' '))}",
+        )
+
     entropy_only_suppressed = False
     if high_entropy_sections:
         suppressed = context.get("is_go") and not strong_malicious_chain_present
@@ -345,6 +360,16 @@ def build_analysis_summary(
             severity = capped
             recommended_next_step = "archive" if capped == "low" else "review_manually"
 
+    primary_behavior = matched_correlated_behaviors[0] if matched_correlated_behaviors else None
+    if primary_behavior:
+        desired_severity = primary_behavior.get("severity_hint")
+        if desired_severity and SEVERITY_ORDER[severity] < SEVERITY_ORDER[desired_severity]:
+            severity = desired_severity
+        if primary_behavior.get("recommended_next_step") == "investigate_deeper":
+            recommended_next_step = "investigate_deeper"
+        elif primary_behavior.get("recommended_next_step") == "archive" and severity == "low":
+            recommended_next_step = "archive"
+
     if not top_findings:
         if environment.get("degraded_mode"):
             top_findings.append("Analysis ran in degraded mode")
@@ -362,7 +387,7 @@ def build_analysis_summary(
     return {
         "severity": severity,
         "score": score,
-        "top_findings": top_findings[:5],
+        "top_findings": list(dict.fromkeys(top_findings))[:5],
         "reasons": reasons[:10],
         "recommended_next_step": recommended_next_step,
         "score_breakdown": breakdown,

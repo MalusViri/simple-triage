@@ -132,7 +132,16 @@ def test_installer_context_beats_downloader_residue_when_chains_are_weak():
         context=context,
         behavior_chains=chains,
     )
-    intents = infer_intents(context, capabilities, chains, grouped, iocs, summary, settings)
+    intents = infer_intents(
+        context,
+        capabilities,
+        chains,
+        [],
+        grouped,
+        iocs,
+        summary,
+        settings,
+    )
 
     assert summary["severity"] == "low"
     assert intents["primary"] == "likely_installer_or_packaged_app"
@@ -185,6 +194,7 @@ def test_interpretation_is_populated_for_malicious_and_packaged_cases():
         },
         context={"installer_like": False, "is_go": False, "is_dotnet": False},
         behavior_chains={"download_write_execute_chain": {"matched": True, "evidence": ["URLDownloadToFileW", "CreateProcessW"]}},
+        correlated_behaviors=[],
         intent_inference={"primary": "likely_downloader"},
         analysis_summary={"top_findings": ["Validated external network indicators were identified"], "suppressed_signal_classes": []},
         packed_assessment={"likely_packed": False, "high_entropy_sections": []},
@@ -200,6 +210,7 @@ def test_interpretation_is_populated_for_malicious_and_packaged_cases():
         },
         context={"installer_like": True, "is_go": False, "is_dotnet": False},
         behavior_chains={"download_write_execute_chain": {"matched": False, "evidence": []}},
+        correlated_behaviors=[],
         intent_inference={"primary": "likely_installer_or_packaged_app"},
         analysis_summary={"top_findings": ["Likely packed based on PE section entropy"], "suppressed_signal_classes": ["weak_network_residue"]},
         packed_assessment={"likely_packed": True, "high_entropy_sections": [{"name": ".ndata"}]},

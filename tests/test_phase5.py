@@ -220,7 +220,16 @@ def test_grouped_domains_behavior_chains_and_intent_inference():
         context=context,
         behavior_chains=chains,
     )
-    intents = infer_intents(context, capabilities, chains, grouped, iocs, summary, settings)
+    intents = infer_intents(
+        context,
+        capabilities,
+        chains,
+        [],
+        grouped,
+        iocs,
+        summary,
+        settings,
+    )
 
     assert grouped["network"]["matched"] is True
     assert grouped["execution"]["matched"] is True

@@ -77,6 +77,10 @@
         "127.0.0.1",
         "169.254.169.254"
       ],
+      "version_like_octet_thresholds": {
+        "max_major": 31,
+        "max_minor": 31
+      },
       "version_context_terms": [
         "assemblyversion",
         "assembly file version",
@@ -106,7 +110,11 @@
       "bitsadmin /transfer",
       "certutil -urlcache",
       "regsvr32 /s",
-      "mshta http"
+      "mshta http",
+      "cmd.exe /c ping",
+      "cmd /c ping",
+      "& del ",
+      "&& del "
     ],
     "command_contextual_terms": [
       "msiexec",
@@ -393,7 +401,113 @@
       "installer_without_malicious_chain": 6,
       "go_entropy_only": 4,
       "weak_network_residue": 3
+    },
+    "behavior_correlation_candidate_weights": {
+      "high": 15,
+      "medium": 11,
+      "low": 0
     }
+  },
+  "behavior_correlation": {
+    "limits": {
+      "evidence": 6,
+      "rationale": 6,
+      "next_steps": 3
+    },
+    "confidence_thresholds": {
+      "high": 10
+    },
+    "match_thresholds": {
+      "likely_downloader_or_dropper": 8,
+      "likely_process_injection_loader": 9,
+      "likely_obfuscated_loader": 6,
+      "likely_installer_or_packaged_app": 7,
+      "benign_or_low_signal_packaged_runtime": 5
+    },
+    "weights": {
+      "behavior_chain": 7,
+      "capability_high": 4,
+      "capability_medium": 3,
+      "networking_capability": 2,
+      "execution_capability": 2,
+      "external_ioc": 2,
+      "command_ioc": 2,
+      "filesystem_ioc": 1,
+      "self_delete_command": 3,
+      "installer_suppression": 5,
+      "canonical_injection_chain": 9,
+      "process_injection_capability": 4,
+      "crypto_or_encoding": 2,
+      "anti_analysis_boost": 1,
+      "packed_context": 2,
+      "installer_context": 4,
+      "installer_chain": 3,
+      "runtime_noise": 2,
+      "runtime_context": 3
+    },
+    "command_patterns": {
+      "self_delete": [
+        "cmd.exe /c ping",
+        "cmd /c ping",
+        "& del ",
+        "&& del ",
+        " timeout ",
+        "/c del "
+      ]
+    },
+    "process_injection_loader": {
+      "api_groups": {
+        "open_process": [
+          "OpenProcess",
+          "NtOpenProcess"
+        ],
+        "allocate": [
+          "VirtualAllocEx",
+          "VirtualAlloc"
+        ],
+        "write_memory": [
+          "WriteProcessMemory",
+          "NtWriteVirtualMemory"
+        ],
+        "start_remote_thread": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "RtlCreateUserThread"
+        ]
+      }
+    },
+    "next_steps": {
+      "likely_downloader_or_dropper": [
+        "Review retrieval and payload staging logic",
+        "Trace execution flow into dropped or launched content",
+        "Inspect cleanup or self-delete command paths"
+      ],
+      "likely_process_injection_loader": [
+        "Review the remote-process injection path and target selection",
+        "Inspect payload decoding, crypto, or decompression helpers",
+        "Consider API tracing or sandboxing later if safe in the lab"
+      ],
+      "likely_obfuscated_loader": [
+        "Unpack or deobfuscate the sample before deeper review",
+        "Recover decoded strings and configuration material",
+        "Trace the execution handoff after decoding"
+      ],
+      "likely_installer_or_packaged_app": [
+        "Review exported artifacts for any stronger corroborating chain",
+        "Confirm packaging context before deeper escalation",
+        "Archive if no stronger static evidence emerges"
+      ],
+      "benign_or_low_signal_packaged_runtime": [
+        "Preserve the artifacts for later correlation if needed",
+        "Review only if external case context justifies deeper work",
+        "Archive low-signal runtime-heavy samples by default"
+      ]
+    }
+  },
+  "cli_summary": {
+    "max_top_findings": 4,
+    "max_iocs": 3,
+    "max_next_steps": 3
   },
   "interpretation": {
     "installer_or_packager_patterns": [

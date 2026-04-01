@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from staticprep.cli_summary import build_cli_triage_summary
 from staticprep.config import DEFAULT_RULES_DIR
 from staticprep.logging_utils import configure_logging
 from staticprep.main import analyze_batch, analyze_sample
@@ -45,7 +46,7 @@ def main() -> int:
     configure_logging(getattr(args, "verbose", False))
 
     if args.command == "analyze":
-        analyze_sample(
+        report, _ = analyze_sample(
             sample_path=args.sample,
             output_root=args.output,
             rules_dir=args.rules,
@@ -54,6 +55,7 @@ def main() -> int:
             skip_pe=args.skip_pe,
             skip_strings=args.skip_strings,
         )
+        print(build_cli_triage_summary(report.to_dict()))
         return 0
 
     if args.command == "batch":

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from staticprep.analyzers.capabilities import infer_capabilities
+from staticprep.analyzers.behavior_correlation import correlate_behaviors
 from staticprep.analyzers.contextual_analysis import (
     detect_binary_context,
     group_strings_by_behavior,
@@ -320,6 +321,15 @@ def analyze_sample(
         iocs=iocs,
         analysis_settings=analysis_settings,
     )
+    correlated_behaviors = correlate_behaviors(
+        capabilities=capabilities_dict,
+        grouped_strings=grouped_string_domains,
+        iocs=iocs,
+        behavior_chains=behavior_chains,
+        context=context,
+        imports=imports,
+        analysis_settings=analysis_settings,
+    )
     interesting_strings_preview = build_interesting_strings_preview(
         suspicious_categories,
         iocs,
@@ -334,11 +344,13 @@ def analyze_sample(
         analysis_settings=analysis_settings,
         context=context,
         behavior_chains=behavior_chains,
+        correlated_behaviors=correlated_behaviors,
     )
     intent_inference = infer_intents(
         context=context,
         capabilities=capabilities_dict,
         behavior_chains=behavior_chains,
+        correlated_behaviors=correlated_behaviors,
         grouped_strings=grouped_string_domains,
         iocs=iocs,
         analysis_summary=analysis_summary,
@@ -349,6 +361,7 @@ def analyze_sample(
         iocs=iocs,
         context=context,
         behavior_chains=behavior_chains,
+        correlated_behaviors=correlated_behaviors,
         intent_inference=intent_inference,
         analysis_summary=analysis_summary,
         packed_assessment=packed_assessment,
@@ -389,6 +402,7 @@ def analyze_sample(
         packed_assessment=packed_assessment,
         iocs=iocs,
         behavior_chains=behavior_chains,
+        correlated_behaviors=correlated_behaviors,
         intent_inference=intent_inference,
         interesting_strings_preview=interesting_strings_preview,
         hashes=hashes,

@@ -160,6 +160,7 @@ def test_build_interpretation_adds_packager_guardrails():
             "is_dotnet": False,
         },
         behavior_chains={"download_write_execute_chain": {"matched": False}},
+        correlated_behaviors=[],
         intent_inference={"primary": "likely_installer_or_packaged_app"},
         analysis_summary={"top_findings": ["Likely packed"], "suppressed_signal_classes": []},
         packed_assessment={"likely_packed": True, "high_entropy_sections": [{"name": ".ndata"}]},

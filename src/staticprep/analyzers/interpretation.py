@@ -21,6 +21,7 @@ def build_interpretation(
     iocs: dict[str, Any],
     context: dict[str, Any],
     behavior_chains: dict[str, Any],
+    correlated_behaviors: list[dict[str, Any]],
     intent_inference: dict[str, Any],
     analysis_summary: dict[str, Any],
     packed_assessment: dict[str, Any],
@@ -92,8 +93,14 @@ def build_interpretation(
         )
 
     primary_intent = intent_inference.get("primary", "ambiguous_requires_manual_review")
+    primary_behavior = next(
+        (behavior for behavior in correlated_behaviors if behavior.get("matched")),
+        None,
+    )
     strongest_evidence: list[str] = []
     suppressed_evidence: list[str] = []
+    if primary_behavior:
+        strongest_evidence.extend(primary_behavior.get("evidence", [])[:2])
     for chain_name, chain in sorted(behavior_chains.items()):
         if chain.get("matched"):
             strongest_evidence.extend(chain.get("evidence", [])[:2])
@@ -113,7 +120,22 @@ def build_interpretation(
         : interpretation_settings["max_suppressed_evidence_items"]
     ]
 
-    if primary_intent == "likely_downloader" and behavior_chains.get("download_write_execute_chain", {}).get("matched"):
+    if primary_behavior and primary_behavior["name"] == "likely_process_injection_loader":
+        analyst_summary = (
+            "This sample exposes a process-injection-style loader pattern. "
+            "Manual review should center on the remote-process chain, any payload transformation logic, and the likely post-launch target."
+        )
+    elif primary_behavior and primary_behavior["name"] == "likely_downloader_or_dropper":
+        analyst_summary = (
+            "This sample shows a coherent downloader or dropper pattern with corroborated retrieval, staging, and execution evidence. "
+            "Review should focus on the staging path, command flow, and any cleanup or self-delete behavior."
+        )
+    elif primary_behavior and primary_behavior["name"] == "likely_obfuscated_loader":
+        analyst_summary = (
+            "This sample combines obfuscation or packing indicators with execution-oriented evidence. "
+            "Review should prioritize deobfuscation, decoded strings, and the execution handoff path."
+        )
+    elif primary_intent == "likely_downloader" and behavior_chains.get("download_write_execute_chain", {}).get("matched"):
         analyst_summary = (
             "This sample demonstrates a clear download, write, and execute chain supported by "
             f"{', '.join(strongest_evidence[:3]) or 'corroborated static evidence'}, which strongly suggests downloader-like behavior."
@@ -137,7 +159,13 @@ def build_interpretation(
             "Manual review should focus on the strongest corroborated findings and the evidence that was intentionally suppressed."
         )
 
-    if context.get("installer_like") and not behavior_chains.get("download_write_execute_chain", {}).get("matched"):
+    if primary_behavior and primary_behavior["name"] == "likely_process_injection_loader":
+        quick_assessment = "A process injection loader pattern is supported by correlated static evidence."
+    elif primary_behavior and primary_behavior["name"] == "likely_downloader_or_dropper":
+        quick_assessment = "Correlated staging and execution evidence points to downloader or dropper behavior."
+    elif primary_behavior and primary_behavior["name"] == "likely_obfuscated_loader":
+        quick_assessment = "Obfuscation or packing indicators are paired with execution-oriented behavior."
+    elif context.get("installer_like") and not behavior_chains.get("download_write_execute_chain", {}).get("matched"):
         quick_assessment = "Installer or packaged-app context is dominant; suspicious residue appears limited or weak."
     elif behavior_chains.get("download_write_execute_chain", {}).get("matched"):
         quick_assessment = "Corroborated execution-oriented behavior is present and outweighs generic context."

@@ -25,6 +25,7 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
     interpretation = report["interpretation"]
     environment = report["environment"]
     behavior_chains = report["behavior_chains"]
+    correlated_behaviors = report.get("correlated_behaviors", [])
     intent_inference = report["intent_inference"]
     packed_assessment = report["packed_assessment"]
     iocs = report["iocs"]
@@ -59,6 +60,7 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
         f"- Analysis degraded: `{findings['executive_summary']['analysis_degraded']}`",
         f"- Likely packed: `{packed_assessment['likely_packed']}`",
         f"- Primary likely intent: `{intent_inference['primary']}`",
+        f"- Primary correlated behavior: `{next((item['name'] for item in correlated_behaviors if item['matched']), 'none')}`",
         f"- Secondary intents: `{', '.join(intent_inference.get('secondary', [])) if intent_inference.get('secondary') else 'none'}`",
         f"- Quick assessment: {interpretation.get('quick_assessment', 'none')}",
         f"- YARA health: `{yara.get('yara_health', 'unknown')}`",
@@ -99,6 +101,19 @@ def build_summary_markdown(report: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No composed behavior chains were identified.")
+
+    lines.extend(["", "## Correlated Behaviors", ""])
+    matched_behaviors = [item for item in correlated_behaviors if item["matched"]]
+    if matched_behaviors:
+        for behavior in matched_behaviors:
+            evidence = ", ".join(behavior.get("evidence", [])[:3]) or "none"
+            rationale = ", ".join(behavior.get("rationale", [])[:2]) or "none"
+            next_steps = ", ".join(behavior.get("analyst_next_steps", [])[:2]) or "none"
+            lines.append(
+                f"- `{behavior['name']}` confidence=`{behavior['confidence']}` evidence=`{evidence}` rationale=`{rationale}` next_steps=`{next_steps}`"
+            )
+    else:
+        lines.append("- No correlated behavior patterns were matched.")
 
     lines.extend(["", "## Likely Intent", ""])
     if intent_inference["candidates"]:

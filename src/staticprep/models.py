@@ -49,6 +49,7 @@ class AnalysisReport:
     packed_assessment: dict[str, Any]
     iocs: dict[str, Any]
     behavior_chains: dict[str, Any]
+    correlated_behaviors: list[dict[str, Any]]
     intent_inference: dict[str, Any]
     interesting_strings_preview: list[str]
     hashes: dict[str, str]

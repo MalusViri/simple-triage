@@ -336,6 +336,7 @@ def infer_intents(
     context: dict[str, Any],
     capabilities: dict[str, dict[str, Any]],
     behavior_chains: dict[str, dict[str, Any]],
+    correlated_behaviors: list[dict[str, Any]],
     grouped_strings: dict[str, dict[str, Any]],
     iocs: dict[str, Any],
     analysis_summary: dict[str, Any],
@@ -345,6 +346,7 @@ def infer_intents(
     settings = analysis_settings["intent_inference"]
     candidates: list[dict[str, Any]] = []
     candidate_weights = settings["candidate_weights"]
+    correlated_intent_weights = settings["behavior_correlation_candidate_weights"]
     suppressions = settings["context_suppression"]
     high_iocs = iocs.get("high_confidence", {})
     classified = iocs.get("classified", {})
@@ -393,6 +395,16 @@ def infer_intents(
                 "evidence": unique_evidence,
                 "suppressed_by_context": suppressed_reasons or [],
             }
+        )
+
+    for behavior in correlated_behaviors:
+        if not behavior.get("matched"):
+            continue
+        add_candidate(
+            behavior["name"],
+            correlated_intent_weights.get(behavior["confidence"], 0),
+            behavior.get("rationale", []),
+            behavior.get("evidence", []),
         )
 
     downloader_score = 0
@@ -487,7 +499,7 @@ def infer_intents(
         installer_score += candidate_weights["runtime_noise"]
         installer_rationale.append("runtime strings are dominated by framework or packaging residue")
         installer_evidence.extend(context.get("evidence", {}).get("runtime_noise_strings", []))
-    if not strong_malicious_chain_present:
+    if installer_score > 0 and not strong_malicious_chain_present:
         installer_score += 2
         installer_rationale.append("stronger malicious chains are absent")
 
@@ -534,7 +546,7 @@ def infer_intents(
             {
                 "name": "ambiguous_requires_manual_review",
                 "matched": True,
-                "confidence": "medium",
+                "confidence": "low",
                 "score": 0,
                 "rationale": [
                     "evidence did not support a single strong hypothesis"
