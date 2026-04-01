@@ -16,6 +16,7 @@ from staticprep.analyzers.contextual_analysis import (
     infer_behavior_chains,
     infer_intents,
 )
+from staticprep.analyzers.decision_control import build_final_decision
 from staticprep.analyzers.evidence import (
     assess_evidence_quality,
     annotate_suspicious_string_matches,
@@ -369,6 +370,28 @@ def analyze_sample(
         yara_results=yara_results,
         analysis_settings=analysis_settings,
     )
+    final_decision = build_final_decision(
+        analysis_summary=analysis_summary,
+        correlated_behaviors=correlated_behaviors,
+        intent_inference=intent_inference,
+        interpretation=interpretation,
+        context=context,
+        iocs=iocs,
+        behavior_chains=behavior_chains,
+        analysis_settings=analysis_settings,
+    )
+    analysis_summary["severity"] = final_decision["normalized_severity"]
+    analysis_summary["recommended_next_step"] = final_decision["normalized_next_step"]
+    normalized_behavior_finding = f"Likely behavior: {final_decision['headline_behavior']}"
+    analysis_summary["top_findings"] = [
+        normalized_behavior_finding,
+        *[
+            finding
+            for finding in analysis_summary.get("top_findings", [])
+            if not finding.startswith("Likely behavior:")
+        ],
+    ][:5]
+    interpretation["quick_assessment"] = final_decision["quick_assessment"]
     reasoning_quality_summary = {
         "total_strings_reviewed": len(string_quality),
         "reasoning_eligible_count": len(reasoning_strings),
@@ -404,6 +427,7 @@ def analyze_sample(
         behavior_chains=behavior_chains,
         correlated_behaviors=correlated_behaviors,
         intent_inference=intent_inference,
+        final_decision=final_decision,
         interesting_strings_preview=interesting_strings_preview,
         hashes=hashes,
         strings={

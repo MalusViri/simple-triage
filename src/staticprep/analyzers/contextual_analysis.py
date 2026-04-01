@@ -187,6 +187,19 @@ def infer_behavior_chains(
     def group_matched(name: str) -> bool:
         return bool(grouped_strings.get(name, {}).get("matched"))
 
+    def _entries_with_terms(
+        entries: list[dict[str, Any]] | None,
+        terms: list[str],
+    ) -> list[str]:
+        matched: list[str] = []
+        lowered_terms = [term.lower() for term in terms]
+        for entry in _allowed_entries(entries):
+            value = str(entry.get("value", ""))
+            lowered_value = value.lower()
+            if any(term in lowered_value for term in lowered_terms):
+                matched.append(value)
+        return matched
+
     chains: dict[str, dict[str, Any]] = {}
 
     download_signal_count = sum(
@@ -238,17 +251,35 @@ def infer_behavior_chains(
         ),
     }
 
-    persistence_chain = (
-        capability_matched("persistence")
-        and (group_matched("registry") or bool(high_iocs.get("registry_paths")))
+    persistence_settings = settings.get("persistence_chain", {})
+    autorun_terms = list(persistence_settings.get("autorun_terms", []))
+    autorun_registry_paths = _entries_with_terms(high_iocs.get("registry_paths"), autorun_terms)
+    contextual_startup_paths = _entries_with_terms(contextual_iocs.get("file_paths"), autorun_terms)
+    command_persistence = _entries_with_terms(high_iocs.get("commands"), autorun_terms)
+    registry_behavior = group_matched("registry") or bool(autorun_registry_paths)
+    service_behavior = bool(capabilities.get("service_creation", {}).get("matched"))
+    startup_behavior = bool(contextual_startup_paths)
+    scheduled_task_behavior = bool(command_persistence)
+    persistence_chain = capability_matched("persistence") and any(
+        [registry_behavior, service_behavior, startup_behavior, scheduled_task_behavior]
     )
     chains["persistence_chain"] = {
         "matched": persistence_chain,
-        "confidence": "high" if persistence_chain and bool(high_iocs.get("registry_paths")) else "medium" if persistence_chain else "low",
+        "confidence": (
+            "high"
+            if persistence_chain and (bool(autorun_registry_paths) or service_behavior)
+            else "medium"
+            if persistence_chain
+            else "low"
+        ),
         "evidence": sorted(
             set(
                 capabilities.get("persistence", {}).get("evidence", [])[:3]
                 + grouped_strings.get("registry", {}).get("evidence", [])[:3]
+                + autorun_registry_paths[:3]
+                + contextual_startup_paths[:2]
+                + command_persistence[:2]
+                + capabilities.get("service_creation", {}).get("evidence", [])[:2]
             )
         )[:6],
         "evidence_sources": sorted(
@@ -256,7 +287,8 @@ def infer_behavior_chains(
             for source, matched in {
                 "capabilities": capability_matched("persistence"),
                 "grouped_strings": group_matched("registry"),
-                "iocs": bool(high_iocs.get("registry_paths")),
+                "iocs": bool(autorun_registry_paths or contextual_startup_paths or command_persistence),
+                "service_creation": service_behavior,
             }.items()
             if matched
         ),

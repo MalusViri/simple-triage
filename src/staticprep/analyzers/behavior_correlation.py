@@ -31,6 +31,18 @@ def _canonical_injection_chain_present(flat_imports: set[str], settings: dict[st
     )
 
 
+def _entries_with_terms(entries: list[dict[str, Any]] | None, terms: list[str]) -> list[str]:
+    """Return IOC values that contain any supplied term."""
+    lowered_terms = [term.lower() for term in terms]
+    matched: list[str] = []
+    for entry in entries or []:
+        value = str(entry.get("value", ""))
+        lowered_value = value.lower()
+        if any(term in lowered_value for term in lowered_terms):
+            matched.append(value)
+    return matched
+
+
 def correlate_behaviors(
     capabilities: dict[str, dict[str, Any]],
     grouped_strings: dict[str, dict[str, Any]],
@@ -42,6 +54,7 @@ def correlate_behaviors(
 ) -> list[dict[str, Any]]:
     """Build deterministic correlated behavior patterns for triage guidance."""
     settings = analysis_settings["behavior_correlation"]
+    downloader_requirements = settings.get("downloader_requirements", {})
     limits = settings["limits"]
     high_iocs = iocs.get("high_confidence", {})
     contextual_iocs = iocs.get("contextual", {})
@@ -91,6 +104,19 @@ def correlate_behaviors(
     download_evidence: list[str] = []
     download_rationale: list[str] = []
     download_score = 0
+    retrieval_api_hits = sorted(
+        {
+            api_name
+            for api_name in downloader_requirements.get("retrieval_api_terms", [])
+            if api_name.lower() in flat_imports
+        }
+    )
+    payload_path_hits = _entries_with_terms(
+        high_iocs.get("file_paths", []) + contextual_iocs.get("file_paths", []),
+        list(downloader_requirements.get("staging_path_terms", [])),
+    )
+    execution_present = capability_matched("process_execution") or group_matched("execution") or bool(high_iocs.get("commands"))
+    nontrusted_external_ioc = bool(high_iocs.get("urls") or high_iocs.get("domains"))
     if behavior_chains.get("download_write_execute_chain", {}).get("matched"):
         download_score += settings["weights"]["behavior_chain"]
         download_rationale.append("download, write, and execute evidence forms a corroborated chain")
@@ -132,6 +158,22 @@ def correlate_behaviors(
         download_evidence.extend(_take_values(high_iocs.get("file_paths")))
         download_evidence.extend(_take_values(contextual_iocs.get("file_paths")))
 
+    strong_downloader_corroboration = (
+        behavior_chains.get("download_write_execute_chain", {}).get("matched")
+        or (
+            bool(retrieval_api_hits)
+            and execution_present
+            and (
+                bool(payload_path_hits)
+                or bool(self_delete_commands)
+                or nontrusted_external_ioc
+            )
+        )
+    )
+    if retrieval_api_hits:
+        download_rationale.append("retrieval-oriented networking APIs were observed")
+        download_evidence.extend(retrieval_api_hits[:3])
+
     if context.get("installer_like") and not any(
         behavior_chains.get(name, {}).get("matched")
         for name in ("download_write_execute_chain", "credential_access_chain", "persistence_chain")
@@ -141,7 +183,11 @@ def correlate_behaviors(
 
     downloader_behavior = add_behavior(
         name="likely_downloader_or_dropper",
-        matched=download_score >= settings["match_thresholds"]["likely_downloader_or_dropper"],
+        matched=(
+            download_score >= settings["match_thresholds"]["likely_downloader_or_dropper"]
+            and strong_downloader_corroboration
+            and not (context.get("installer_like") and not behavior_chains.get("download_write_execute_chain", {}).get("matched") and not self_delete_commands and not payload_path_hits)
+        ),
         score=download_score,
         rationale=download_rationale,
         evidence=download_evidence,

@@ -20,8 +20,8 @@ def _first_matched_behavior(report: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _format_iocs(report: dict[str, Any], limit: int) -> list[str]:
-    """Return a compact analyst-relevant IOC list."""
+def _fallback_iocs(report: dict[str, Any], limit: int) -> list[str]:
+    """Return a compact IOC list for reports without final decision output."""
     iocs = report["iocs"]
     ordered_values: list[str] = []
     seen: set[str] = set()
@@ -46,41 +46,49 @@ def _format_iocs(report: dict[str, Any], limit: int) -> list[str]:
             if len(ordered_values) >= limit:
                 return ordered_values
     return ordered_values
-
-
 def build_cli_triage_summary(report: dict[str, Any]) -> str:
     """Return a compact plain-text triage summary for single-sample analysis."""
     settings = report.get("cli_summary", {})
+    final_decision = report.get("final_decision", {})
     primary_behavior = _first_matched_behavior(report)
     analysis_summary = report["analysis_summary"]
     interpretation = report["interpretation"]
     context = report["context"]
 
-    likely_behavior = (
+    likely_behavior = final_decision.get(
+        "headline_behavior",
         primary_behavior["summary_label"]
         if primary_behavior
-        else report["intent_inference"]["primary"].replace("_", " ")
+        else report["intent_inference"]["primary"].replace("_", " "),
     )
-    next_step = (
+    next_step = final_decision.get(
+        "normalized_next_step",
         primary_behavior["recommended_next_step"]
         if primary_behavior
-        else analysis_summary["recommended_next_step"]
+        else analysis_summary["recommended_next_step"],
     )
     findings = analysis_summary.get("top_findings", [])[: settings.get("max_top_findings", 4)]
-    ioc_values = _format_iocs(report, settings.get("max_iocs", 3))
-    next_analysis_path = (
-        primary_behavior.get("analyst_next_steps", [])[: settings.get("max_next_steps", 3)]
-        if primary_behavior
-        else []
-    )
+    ioc_values = final_decision.get("notable_iocs", [])[: settings.get("max_iocs", 3)]
+    if not ioc_values:
+        ioc_values = _fallback_iocs(report, settings.get("max_iocs", 3))
+    next_analysis_path = final_decision.get("actionable_next_steps", [])[
+        : settings.get("max_next_steps", 3)
+    ]
     if not next_analysis_path:
-        next_analysis_path = [interpretation.get("quick_assessment", "Review the structured artifacts.")]
+        if primary_behavior:
+            next_analysis_path = primary_behavior.get("analyst_next_steps", [])[
+                : settings.get("max_next_steps", 3)
+            ]
+    if not next_analysis_path:
+        next_analysis_path = [
+            interpretation.get("quick_assessment", "Review the structured artifacts.")
+        ]
 
     lines = [
         f"Sample: {report['sample']['name']}",
         f"SHA256: {report['hashes']['sha256']}",
         "",
-        f"Severity: {analysis_summary['severity'].upper()}",
+        f"Severity: {final_decision.get('normalized_severity', analysis_summary['severity']).upper()}",
         f"Likely Behavior: {likely_behavior}",
         f"Recommended Next Step: {NEXT_STEP_LABELS.get(next_step, next_step)}",
         "",

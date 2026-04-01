@@ -10,6 +10,39 @@
     "min_high_entropy_sections_for_likely_packed": 1
   },
   "artifact_filters": {
+    "trusted_domains": [
+      "schemas.microsoft.com",
+      "go.microsoft.com",
+      "download.microsoft.com",
+      "www.microsoft.com"
+    ],
+    "trusted_domain_suffixes": [
+      ".microsoft.com",
+      ".windows.com"
+    ],
+    "trusted_url_prefixes": [
+      "http://schemas.microsoft.com/",
+      "https://schemas.microsoft.com/",
+      "http://go.microsoft.com/",
+      "https://go.microsoft.com/",
+      "http://download.microsoft.com/",
+      "https://download.microsoft.com/"
+    ],
+    "installer_safe_domains": [
+      "schemas.microsoft.com",
+      "go.microsoft.com",
+      "download.microsoft.com",
+      "www.microsoft.com"
+    ],
+    "manifest_or_schema_url_patterns": [
+      "/winfx/",
+      "/manifest",
+      "/schema",
+      "/schemas/",
+      "assembly.adaptive",
+      "asm.v",
+      "trustinfo"
+    ],
     "trusted_pki_domains_or_patterns": [
       "crl",
       "ocsp",
@@ -377,6 +410,16 @@
       "minimum_download_signals": 2,
       "minimum_execution_signals": 1,
       "minimum_filesystem_signals": 1
+    },
+    "persistence_chain": {
+      "autorun_terms": [
+        "currentversion\\run",
+        "\\runonce",
+        "\\startup\\",
+        "schtasks",
+        "createservice",
+        "startservice"
+      ]
     }
   },
   "intent_inference": {
@@ -502,12 +545,87 @@
         "Review only if external case context justifies deeper work",
         "Archive low-signal runtime-heavy samples by default"
       ]
+    },
+    "downloader_requirements": {
+      "retrieval_api_terms": [
+        "URLDownloadToFileA",
+        "URLDownloadToFileW",
+        "InternetOpenA",
+        "InternetOpenW",
+        "InternetOpenUrlA",
+        "InternetOpenUrlW",
+        "InternetConnectA",
+        "InternetConnectW",
+        "WinHttpOpen",
+        "WinHttpConnect",
+        "WinHttpOpenRequest",
+        "WinHttpSendRequest",
+        "URLMonikerBindToStorage"
+      ],
+      "staging_path_terms": [
+        "\\temp\\",
+        "\\appdata\\",
+        "programdata",
+        ".exe",
+        ".dll",
+        ".dat",
+        ".bin"
+      ]
     }
   },
   "cli_summary": {
     "max_top_findings": 4,
     "max_iocs": 3,
     "max_next_steps": 3
+  },
+  "decision_control": {
+    "behavior_priority": [
+      "likely_process_injection_loader",
+      "likely_downloader_or_dropper",
+      "likely_obfuscated_loader",
+      "likely_installer_or_packaged_app",
+      "benign_or_low_signal_packaged_runtime"
+    ],
+    "confidence_weights": {
+      "high": 4,
+      "medium": 2,
+      "low": 0
+    },
+    "severity_rank": {
+      "low": 0,
+      "medium": 1,
+      "high": 2
+    },
+    "trusted_ioc_types_for_cli": [
+      "trusted_pki",
+      "trusted_platform"
+    ],
+    "installer_suppressed_behaviors": [
+      "likely_downloader_or_dropper",
+      "likely_obfuscated_loader"
+    ],
+    "contradiction_guards": {
+      "managed_requires_dotnet": true,
+      "packed_wording_requires_packed_context": true
+    },
+    "default_actionable_next_steps": {
+      "archive": [
+        "No further analysis unless additional context exists"
+      ],
+      "review_manually": [
+        "Review the strongest corroborated findings in report.json",
+        "Check whether case context justifies deeper static review"
+      ],
+      "investigate_deeper": [
+        "Review the strongest corroborated execution and staging evidence",
+        "Inspect related strings, imports, and dropped-path indicators"
+      ]
+    },
+    "fallback_headlines": {
+      "archive": "installer or packaged application",
+      "review_manually": "mixed static signals",
+      "investigate_deeper": "suspicious behavior candidate"
+    }
   },
   "interpretation": {
     "installer_or_packager_patterns": [

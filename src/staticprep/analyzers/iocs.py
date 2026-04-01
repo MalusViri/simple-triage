@@ -21,6 +21,7 @@ IOC_TYPES = (
 CONTEXTUAL_CLASSES = {
     "low_confidence",
     "trusted_pki",
+    "trusted_platform",
     "likely_build_artifact",
     "likely_installer_artifact",
     "contextual_only",
@@ -105,6 +106,13 @@ def _contains_any(value: str, patterns: list[str]) -> bool:
     return any(pattern.lower() in lowered for pattern in patterns)
 
 
+def _matches_domain(host: str, settings: dict[str, object]) -> bool:
+    """Return whether a host belongs to a trusted platform allowlist."""
+    trusted_domains = {value.lower() for value in settings.get("trusted_domains", [])}
+    suffixes = tuple(value.lower() for value in settings.get("trusted_domain_suffixes", []))
+    return host in trusted_domains or (suffixes and host.endswith(suffixes))
+
+
 def _context_matches(value: str, context_strings: list[str], patterns: list[str]) -> bool:
     """Return whether the IOC value appears near contextual language markers."""
     lowered_value = value.lower()
@@ -131,6 +139,15 @@ def _classify_url(value: str, settings: dict[str, object]) -> tuple[str, list[st
     if not host or "." not in host:
         return "malformed", ["missing_or_invalid_host"]
 
+    lowered_value = value.lower()
+    if any(lowered_value.startswith(prefix.lower()) for prefix in settings.get("trusted_url_prefixes", [])):
+        return "trusted_platform", ["trusted_platform_reference"]
+    if _matches_domain(host, settings):
+        if _contains_any(combined, list(settings.get("manifest_or_schema_url_patterns", []))):
+            return "trusted_platform", ["trusted_manifest_or_schema_reference"]
+        if host in {item.lower() for item in settings.get("installer_safe_domains", [])}:
+            return "trusted_platform", ["trusted_installer_or_platform_reference"]
+        return "trusted_platform", ["trusted_platform_reference"]
     if _contains_any(combined, list(settings["trusted_pki_domains_or_patterns"])):
         return "trusted_pki", ["certificate_or_revocation_infrastructure"]
 
@@ -153,6 +170,10 @@ def _classify_domain(value: str, settings: dict[str, object]) -> tuple[str, list
         return "malformed", ["invalid_domain_structure"]
     if ".-" in lowered or "-." in lowered:
         return "malformed", ["invalid_domain_label"]
+    if _matches_domain(lowered, settings):
+        if lowered in {item.lower() for item in settings.get("installer_safe_domains", [])}:
+            return "trusted_platform", ["trusted_installer_or_platform_reference"]
+        return "trusted_platform", ["trusted_platform_reference"]
     if _contains_any(lowered, list(settings["trusted_pki_domains_or_patterns"])):
         return "trusted_pki", ["certificate_or_revocation_infrastructure"]
     if _contains_any(lowered, list(settings["installer_artifact_patterns"])):
@@ -298,6 +319,7 @@ def classify_iocs(
             "low_confidence": 0,
             "malformed": 0,
             "trusted_pki": 0,
+            "trusted_platform": 0,
             "likely_build_artifact": 0,
             "likely_installer_artifact": 0,
             "contextual_only": 0,

@@ -51,6 +51,7 @@ class AnalysisReport:
     behavior_chains: dict[str, Any]
     correlated_behaviors: list[dict[str, Any]]
     intent_inference: dict[str, Any]
+    final_decision: dict[str, Any]
     interesting_strings_preview: list[str]
     hashes: dict[str, str]
     strings: dict[str, Any]

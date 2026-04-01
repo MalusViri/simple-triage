@@ -46,6 +46,7 @@ The project is intentionally limited to static analysis preparation. It does not
 - Grouped string evidence domains for behavior-oriented review
 - Deterministic behavior chaining and cautious intent inference
 - Deterministic behavior correlation that turns existing signals into a few higher-value analyst behavior patterns
+- Final decision-control normalization that suppresses contradictions, reduces installer/runtime false positives, and produces actionable analyst guidance
 - Cleaner YARA warning hygiene with explicit YARA health states
 
 ## Repository Layout
@@ -122,6 +123,13 @@ The terminal summary is intentionally brief and includes:
 - notable analyst-relevant IOCs when present
 - context flags such as `.NET`, `Go`, likely packed, and degraded mode
 - a short next-analysis-path list
+
+The CLI summary is now normalized through a final decision-control layer instead of using the first matched behavior directly. That layer:
+
+- suppresses contradictory labels such as `managed` when `.NET` context is absent
+- prefers trusted-platform and manifest/schema references as contextual artifacts, not analyst-notable network IOCs
+- applies explicit behavior precedence so process-injection and strong downloader chains outrank weaker obfuscation-only signals
+- forces `Next Analysis Path` output to stay action-oriented
 
 Batch mode:
 
@@ -258,6 +266,61 @@ Additive Phase 4 fields include:
   - `analyst_ready`
   - `contextual`
   - `raw_references`
+
+Additive Phase 7.1 fields include:
+
+- `final_decision`
+  - `selected_behavior_name`
+  - `headline_behavior`
+  - `headline_confidence`
+  - `normalized_severity`
+  - `normalized_next_step`
+  - `actionable_next_steps`
+  - `quick_assessment`
+  - `notable_iocs`
+  - `suppressed_candidates`
+  - `suppression_reasons`
+  - `decision_rationale`
+
+`analysis_summary.severity` and `analysis_summary.recommended_next_step` now reflect that final normalized decision so report text and CLI output stay aligned.
+
+## Decision Control
+
+`staticprep` does not attempt to produce an automated malware verdict. The final decision-control stage is a deterministic normalization pass that refines analyst-facing wording after capabilities, IOC classification, behavior chains, correlated behaviors, intent inference, and interpretation have already been built.
+
+It is used to:
+
+- suppress obvious false positives in installer or runtime-heavy samples
+- remove contradictory wording before it reaches the CLI summary or report headline
+- choose a single headline behavior using explicit precedence instead of first-match ordering
+- normalize severity and next-step guidance when benign context outweighs weak suspicious residue
+- keep `Next Analysis Path` concrete and actionable
+
+## Trusted IOC Handling
+
+Trusted platform references are config-driven and local-only. By default, Microsoft schema and manifest references such as `schemas.microsoft.com` are treated as contextual platform artifacts rather than analyst-notable network infrastructure.
+
+Relevant config keys in `config/analysis_settings.json`:
+
+- `artifact_filters.trusted_domains`
+- `artifact_filters.trusted_domain_suffixes`
+- `artifact_filters.trusted_url_prefixes`
+- `artifact_filters.installer_safe_domains`
+- `artifact_filters.manifest_or_schema_url_patterns`
+
+These references can still remain in raw/contextual views for completeness, but they are excluded from high-confidence network reasoning and from CLI notable IOC output.
+
+## Final Behavior Selection
+
+Correlated behaviors still produce candidate patterns, but the final headline now comes from the decision-control layer. It ranks unsuppressed candidates by matched status, confidence, score, and explicit precedence. Current precedence favors:
+
+1. `likely_process_injection_loader`
+2. `likely_downloader_or_dropper`
+3. `likely_obfuscated_loader`
+4. `likely_installer_or_packaged_app`
+5. `benign_or_low_signal_packaged_runtime`
+
+Installer context without a stronger malicious chain can suppress weak downloader or obfuscation candidates. Trusted platform URLs alone do not satisfy downloader-style external infrastructure evidence.
 - `interpretation`
   - `notes`
   - `codes`

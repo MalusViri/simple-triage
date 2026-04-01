@@ -43,6 +43,7 @@ def test_end_to_end_artifact_generation(tmp_path, fixture_dir):
         "correlated_behaviors",
         "environment",
         "errors",
+        "final_decision",
         "findings",
         "generated_at",
         "hashes",

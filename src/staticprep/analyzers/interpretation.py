@@ -145,11 +145,11 @@ def build_interpretation(
             "This sample appears to be a packaged or installer-like application. "
             "High entropy or generic network residue is present, but the stronger context is packaging or runtime related rather than a clear malicious chain."
         )
-    elif primary_intent == "likely_packed_loader":
+    elif primary_intent == "likely_packed_loader" and packed_assessment.get("likely_packed"):
         analyst_summary = (
             "This sample appears compressed or packed and also shows corroborating execution-oriented evidence, which keeps loader-like behavior in scope."
         )
-    elif primary_intent == "likely_managed_obfuscated_payload":
+    elif primary_intent == "likely_managed_obfuscated_payload" and context.get("is_dotnet"):
         analyst_summary = (
             "This sample shows managed-code context with sparse imports and additional suspicious corroboration, which is consistent with an obfuscated .NET payload."
         )
